@@ -18,11 +18,11 @@
 | **2.B** Pipeline composition engine | ✅ Complete | `PipelineRunner` + `PipelineRunnerBuilder`; `run_strategy` orchestrator with DB persistence |
 | **2.C** First strategy plugins | ✅ Complete | `strategy-momentum` (Identifier), `strategy-mean-reversion` (Timer), `strategy-atr-sizer` (Sizer) |
 | **2.D** CLI wiring (strategy) | ✅ Complete | `economind run --config <uuid>` and `economind signals` subcommands |
-| **3.A** Yahoo Finance connector | 🔲 Pending | |
-| **3.B** FRED macro connector | 🔲 Pending | |
-| **3.C** SEC EDGAR connector | 🔲 Pending | |
-| **3.D** SimFin connector | 🔲 Pending | |
-| **3.E** Ingestion orchestration | 🔲 Pending | |
+| **3.A** Yahoo Finance connector | ✅ Complete | `YahooFinanceConnector`: daily bars (v8 chart), metadata (v10 quote summary), bulk fetch with concurrency |
+| **3.B** FRED macro connector | ✅ Complete | `FredConnector`: fetches DGS10/T10Y2Y/CPIAUCSL/UNRATE/VIXCLS/M2SL; `MacroStorage::upsert_macro_series` added to trait + PG impl + DataStore |
+| **3.C** SEC EDGAR connector | ✅ Complete | `EdgarConnector`: XBRL company facts → IS/BS/CF; CIK lookup cache from SEC tickers JSON |
+| **3.D** SimFin connector | ✅ Complete | `SimFinConnector`: v3 columnar response parser → IS/BS/CF |
+| **3.E** Ingestion orchestration | ✅ Complete | `DataFeedManager` with `run_bars`/`run_macro`/`run_fundamentals`/`run_job_by_name`; `economind ingest` CLI subcommand |
 
 ---
 

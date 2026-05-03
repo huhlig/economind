@@ -7,32 +7,29 @@
 // have permission, please contact the copyright holders and delete this file.
 //
 
-//! Economind Data Feeds
+//! Economind Data Ingest
 //!
-//! ## Roadmap
+//! Connectors for all free-tier data sources used in Phase 3.
 //!
-//! ### Market Data
-//! - [ ] Polygon
-//! - [ ] Tiingo
-//! - [ ] Alpha Vantage
-//! - [ ] Kibot
-//! - [ ] IEX Cloud
+//! ## Market Data
+//! - [x] Yahoo Finance — daily OHLCV, instrument metadata (Phase 3.A)
 //!
-//! ### Fundamentals
-//! - [ ] SEC EDGAR filings
-//! - [ ] Financial Modeling Prep
-//! - [ ] Polygon fundamentals
-//! - [ ] Alpha Vantage fundamentals
+//! ## Macro Data
+//! - [x] FRED — macro time series (Phase 3.B)
 //!
-//! ### Risk-Free Rate
-//! - [ ] FRED (Federal Reserve Economic Data)
-//! - [ ] US Treasury site
+//! ## Fundamentals
+//! - [x] SEC EDGAR — annual IS/BS/CF via XBRL (Phase 3.C)
+//! - [x] SimFin — annual IS/BS/CF via REST API (Phase 3.D)
 //!
+//! ## Orchestration
+//! - [x] DataFeedManager — scheduled ingestion jobs (Phase 3.E)
 
 mod error;
 mod httpclient;
+mod manager;
 mod provider;
 
 pub use self::error::*;
 pub use self::httpclient::*;
+pub use self::manager::*;
 pub use self::provider::*;

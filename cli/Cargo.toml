@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 economind-core     = { workspace = true }
 economind-db       = { workspace = true }
+economind-ingest   = { workspace = true }
 economind-strategy = { workspace = true }
 
 # Phase 2 strategy plugins

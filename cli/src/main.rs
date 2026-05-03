@@ -6,12 +6,15 @@
 //!
 //! Thin command-line interface; all business logic lives in other crates.
 //!
-//! # Subcommands (Phase 2)
+//! # Subcommands
 //!
 //! ```text
 //! economind version
-//! economind run    --config <uuid>
-//! economind signals [--since <date>] [--limit <n>] [--symbol <sym>]
+//! economind run       --config <uuid>  [--lookback-days 365]
+//! economind signals   [--since <date>] [--limit <n>] [--symbol <sym>] [--config <uuid>]
+//! economind ingest    bars          [--since <date>] [--concurrency <n>]
+//! economind ingest    macro         [--since <date>] [--series <ids>]
+//! economind ingest    fundamentals  [--edgar-only] [--simfin-only]
 //! ```
 
 mod commands;
@@ -45,7 +48,9 @@ enum Commands {
 
     /// Query and display recent signals.
     Signals(commands::signals::SignalsArgs),
-    // TODO: Phase 3 — add `ingest` subcommands
+
+    /// On-demand data ingestion (bars, macro, fundamentals).
+    Ingest(commands::ingest::IngestArgs),
     // TODO: Phase 4 — add `backtest` subcommand
     // TODO: Phase 7 — add `analyze` subcommand
 }
@@ -74,6 +79,14 @@ async fn main() -> anyhow::Result<()> {
                     "DATABASE_URL must be set (via --database-url or environment)"
                 ))?;
             commands::signals::execute(args, &db_url, &cli.duckdb_path).await?;
+        }
+        Commands::Ingest(args) => {
+            let db_url = cli
+                .database_url
+                .ok_or_else(|| anyhow::anyhow!(
+                    "DATABASE_URL must be set (via --database-url or environment)"
+                ))?;
+            commands::ingest::execute(args, &db_url, &cli.duckdb_path).await?;
         }
     }
 

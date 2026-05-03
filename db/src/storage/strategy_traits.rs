@@ -26,9 +26,12 @@ pub struct MacroSeriesPoint {
     pub fetched_at: DateTime<Utc>,
 }
 
-/// Trait for reading macro series data (written by the ingest crate in Phase 3).
+/// Trait for reading and writing macro series data (written by the ingest crate in Phase 3).
 #[allow(async_fn_in_trait)]
 pub trait MacroStorage: Send + Sync {
+    /// Upsert a batch of macro series observations (insert or update on conflict).
+    async fn upsert_macro_series(&self, points: &[MacroSeriesPoint]) -> StorageResult<()>;
+
     /// Return the latest available value for each of the given series IDs.
     async fn get_latest_macro_values(
         &self,

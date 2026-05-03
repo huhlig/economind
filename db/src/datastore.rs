@@ -352,6 +352,13 @@ impl TickStorage for DataStore {
 // analytical joins needed).  Reads go straight to PostgreSQL.
 
 impl MacroStorage for DataStore {
+    async fn upsert_macro_series(&self, points: &[MacroSeriesPoint]) -> StorageResult<()> {
+        let pg = self.pg.as_ref().ok_or_else(|| {
+            StorageError::Provider("MacroStorage requires a PostgreSQL connection".to_string())
+        })?;
+        pg.upsert_macro_series(points).await
+    }
+
     async fn get_latest_macro_values(
         &self,
         series_ids: &[&str],

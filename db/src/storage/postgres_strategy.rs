@@ -20,6 +20,30 @@ use uuid::Uuid;
 // ── MacroStorage ──────────────────────────────────────────────────────────────
 
 impl MacroStorage for PostgresStorage {
+    async fn upsert_macro_series(&self, points: &[MacroSeriesPoint]) -> StorageResult<()> {
+        if points.is_empty() {
+            return Ok(());
+        }
+        for p in points {
+            sqlx::query(
+                r#"
+                INSERT INTO market.macro_series (series_id, date, value, fetched_at)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (series_id, date) DO UPDATE
+                    SET value      = EXCLUDED.value,
+                        fetched_at = EXCLUDED.fetched_at
+                "#,
+            )
+            .bind(&p.series_id)
+            .bind(p.date)
+            .bind(p.value)
+            .bind(p.fetched_at)
+            .execute(self.pool())
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn get_latest_macro_values(
         &self,
         series_ids: &[&str],

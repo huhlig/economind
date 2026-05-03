@@ -10,6 +10,7 @@ economind-db.workspace = true
 
 # Async
 async-trait.workspace = true
+futures.workspace = true
 futures-core.workspace = true
 tokio.workspace = true
 
