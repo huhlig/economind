@@ -228,8 +228,8 @@ async fn execute_list(
     }
 
     println!(
-        "\n{:<38} {:<36} {:<12} {:<12} {:<10} {:<10} {:<8} {}",
-        "Run ID", "Config ID", "From", "To", "Status", "CAGR", "Sharpe", "MaxDD"
+        "\n{:<38} {:<36} {:<12} {:<12} {:<10} {:<10} {:<8} MaxDD",
+        "Run ID", "Config ID", "From", "To", "Status", "CAGR", "Sharpe"
     );
     println!("{}", "─".repeat(140));
 

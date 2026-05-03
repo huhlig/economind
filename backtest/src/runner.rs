@@ -9,7 +9,7 @@
 //! the `PipelineRunner`, simulates order fills, and records all activity.
 //! At the end, computes performance metrics and persists everything to PostgreSQL.
 
-use crate::metrics::{EquityPoint, PerformanceMetrics};
+use crate::metrics::PerformanceMetrics;
 use crate::simulation::SimPortfolio;
 use chrono::NaiveDate;
 use economind_core::model::{DailyCandleEntry, Symbol};
@@ -79,7 +79,7 @@ impl BacktestRunner {
     ///
     /// Requires `store` to have a PostgreSQL connection (for result persistence)
     /// and populated bar data in DuckDB.
-    pub async fn run(self, store: &DataStore) -> Result<BacktestResult, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(self, store: &DataStore) -> anyhow::Result<BacktestResult> {
         let run_id = Uuid::new_v4();
         let started_at = chrono::Utc::now();
 
@@ -195,7 +195,7 @@ impl BacktestRunner {
                     error_message: Some(msg),
                 };
                 let _ = store.complete_backtest_run(&failed_row).await;
-                Err(e)
+                Err(anyhow::anyhow!("{}", e))
             }
         }
     }
@@ -377,16 +377,13 @@ async fn load_macro_series(
     let mut result: HashMap<String, Vec<(NaiveDate, Decimal)>> = HashMap::new();
 
     for series_id in SERIES {
-        match store.query_macro_series(series_id, load_from..to).await {
-            Ok(points) => {
-                let vals: Vec<(NaiveDate, Decimal)> = points
-                    .into_iter()
-                    .filter_map(|p| p.value.map(|v| (p.date, v)))
-                    .collect();
-                result.insert(series_id.to_string(), vals);
-            }
-            Err(_) => {} // macro data is optional
-        }
+        if let Ok(points) = store.query_macro_series(series_id, load_from..to).await {
+            let vals: Vec<(NaiveDate, Decimal)> = points
+                .into_iter()
+                .filter_map(|p| p.value.map(|v| (p.date, v)))
+                .collect();
+            result.insert(series_id.to_string(), vals);
+        } // macro data is optional
     }
     Ok(result)
 }

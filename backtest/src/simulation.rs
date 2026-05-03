@@ -10,7 +10,6 @@
 use chrono::NaiveDate;
 use economind_core::model::Symbol;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;
 
