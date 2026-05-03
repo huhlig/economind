@@ -4,7 +4,7 @@
 > The architecture document (`ARCHITECTURE.md`) is a collaborative reference, not a specification.
 > Where this plan and the architecture document conflict, this plan takes precedence.
 
-*Last updated: May 2026*
+*Last updated: May 2026 — Phase 5 complete*
 
 ## Progress
 
@@ -26,6 +26,10 @@
 | **4.A** Backtest simulation loop | ✅ Complete | `BacktestRunner` + `SimPortfolio`; no-lookahead context, slippage/commission, max-hold-days forced exit, end-of-run close-all |
 | **4.B** Performance metrics | ✅ Complete | `PerformanceMetrics`: CAGR, Sharpe, Sortino, max drawdown + duration, win rate, profit factor, expectancy, avg hold, largest win/loss |
 | **4.C** CLI wiring (backtest) | ✅ Complete | `economind backtest run` + `economind backtest list`; formatted summary table; `BacktestStorage` trait + PG impl + DataStore facade |
+| **5.A** Axum server scaffold | ✅ Complete | `AppState` with `DataStore` + `EventBus`; `require_api_key` middleware; `health` endpoint |
+| **5.B** REST endpoints | ✅ Complete | `instruments`, `signals`, `positions`, `strategy/configs`, `strategy/run`, `backtest`, `data/bars`, `data/fundamentals`, `data/macro` |
+| **5.C** GraphQL | ✅ Complete | `async-graphql` schema; `QueryRoot` (instruments, signals, portfolio, strategy configs, backtest runs); `MutationRoot` (add/remove instrument, update config, trigger run); GraphiQL at `/graphiql` |
+| **5.D** WebSocket | ✅ Complete | `GET /ws/signals`; `ServerEvent` enum with 7 event types; broadcast via `EventBus`; API-key auth on upgrade |
 
 ---
 

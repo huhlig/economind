@@ -4,17 +4,35 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "economind"
+name = "economind-serve"
 path = "src/main.rs"
 
 [dependencies]
 economind-core     = { workspace = true }
 economind-db       = { workspace = true }
 economind-strategy = { workspace = true }
+economind-backtest = { workspace = true }
+economind-ingest   = { workspace = true }
 
-chrono       = { workspace = true }
-dotenvy      = { workspace = true }
-serde        = { workspace = true }
-serde_json   = { workspace = true }
-thiserror    = { workspace = true }
-tokio        = { workspace = true }
+# Strategy plugins (needed to wire pipelines for on-demand run endpoint)
+strategy-momentum       = { workspace = true }
+strategy-mean-reversion = { workspace = true }
+strategy-atr-sizer      = { workspace = true }
+
+anyhow              = { workspace = true }
+async-graphql       = { workspace = true }
+async-graphql-axum  = { workspace = true }
+axum                = { workspace = true }
+chrono              = { workspace = true }
+dotenvy             = { workspace = true }
+futures             = { workspace = true }
+rust_decimal        = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+thiserror           = { workspace = true }
+tokio               = { workspace = true }
+tower               = { workspace = true }
+tower-http          = { workspace = true }
+tracing             = { workspace = true }
+tracing-subscriber  = { workspace = true }
+uuid                = { workspace = true }

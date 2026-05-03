@@ -51,6 +51,18 @@ futures-core = { version = "0.3" }
 reqwest  = { version = "0.12", features = ["json", "cookies", "rustls-tls"] }
 governor = { version = "0.10", features = ["default"] }
 
+# API server
+axum                = { version = "0.7", features = ["ws", "macros"] }
+tower               = { version = "0.4" }
+tower-http          = { version = "0.5", features = ["cors", "trace", "fs"] }
+async-graphql       = { version = "7", features = ["chrono", "uuid"] }
+async-graphql-axum  = { version = "7" }
+tokio-tungstenite   = { version = "0.21" }
+
+# Observability
+tracing             = { version = "0.1" }
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+
 # Database
 duckdb       = { version = "1", features = ["default"] }
 sqlx         = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "rust_decimal", "macros"] }
