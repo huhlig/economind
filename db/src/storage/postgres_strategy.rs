@@ -2,12 +2,13 @@
 // Copyright (C) Hans W. Uhlig - All Rights Reserved
 //
 
-//! PostgreSQL implementations of `StrategyStorage`, `MacroStorage`, and
-//! `PortfolioStorage` (Phase 2).
+//! PostgreSQL implementations of `StrategyStorage`, `MacroStorage`,
+//! `PortfolioStorage`, and `BacktestStorage` (Phases 2 & 4).
 
 use crate::{StorageError, StorageResult};
 use crate::storage::postgres::PostgresStorage;
 use crate::storage::strategy_traits::{
+    BacktestRunRow, BacktestStorage, BacktestTradeRow, EquityCurvePoint,
     MacroSeriesPoint, MacroStorage, OpenPosition, PortfolioState, PortfolioStorage,
     StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage,
 };
@@ -526,5 +527,285 @@ fn signal_row_from_pg(row: sqlx::postgres::PgRow) -> StrategySignalRow {
         rationale: row.get("rationale"),
         analysis_brief: row.get("analysis_brief"),
         emitted_at: row.get("emitted_at"),
+    }
+}
+
+// ── BacktestStorage ───────────────────────────────────────────────────────────
+
+impl BacktestStorage for PostgresStorage {
+    async fn insert_backtest_run(&self, row: &BacktestRunRow) -> StorageResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO backtest.runs
+                (id, config_id, config_snapshot, from_date, to_date,
+                 initial_capital, status, started_at)
+            VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
+            ON CONFLICT (id) DO NOTHING
+            "#,
+        )
+        .bind(row.id)
+        .bind(row.config_id)
+        .bind(&row.config_snapshot_json)
+        .bind(row.from_date)
+        .bind(row.to_date)
+        .bind(row.initial_capital)
+        .bind(&row.status)
+        .bind(row.started_at)
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
+    async fn complete_backtest_run(&self, row: &BacktestRunRow) -> StorageResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE backtest.runs
+            SET final_capital      = $2,
+                cagr               = $3,
+                sharpe_ratio       = $4,
+                sortino_ratio      = $5,
+                max_drawdown       = $6,
+                max_drawdown_days  = $7,
+                win_rate           = $8,
+                profit_factor      = $9,
+                expectancy         = $10,
+                total_trades       = $11,
+                avg_hold_days      = $12,
+                status             = $13,
+                completed_at       = $14,
+                error_message      = $15
+            WHERE id = $1
+            "#,
+        )
+        .bind(row.id)
+        .bind(row.final_capital)
+        .bind(row.cagr)
+        .bind(row.sharpe_ratio)
+        .bind(row.sortino_ratio)
+        .bind(row.max_drawdown)
+        .bind(row.max_drawdown_days)
+        .bind(row.win_rate)
+        .bind(row.profit_factor)
+        .bind(row.expectancy)
+        .bind(row.total_trades)
+        .bind(row.avg_hold_days)
+        .bind(&row.status)
+        .bind(row.completed_at)
+        .bind(&row.error_message)
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
+    async fn get_backtest_run(&self, id: Uuid) -> StorageResult<Option<BacktestRunRow>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, config_id, config_snapshot::text AS config_snapshot_json,
+                   from_date, to_date, initial_capital, final_capital,
+                   cagr, sharpe_ratio, sortino_ratio,
+                   max_drawdown, max_drawdown_days,
+                   win_rate, profit_factor, expectancy,
+                   total_trades, avg_hold_days,
+                   status, started_at, completed_at, error_message
+            FROM backtest.runs WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(self.pool())
+        .await?;
+
+        Ok(row.map(backtest_run_from_pg))
+    }
+
+    async fn list_backtest_runs(
+        &self,
+        config_id: Option<Uuid>,
+        limit: Option<u32>,
+    ) -> StorageResult<Vec<BacktestRunRow>> {
+        let lim = limit.unwrap_or(50) as i64;
+        let rows = match config_id {
+            Some(cid) => sqlx::query(
+                r#"
+                SELECT id, config_id, config_snapshot::text AS config_snapshot_json,
+                       from_date, to_date, initial_capital, final_capital,
+                       cagr, sharpe_ratio, sortino_ratio,
+                       max_drawdown, max_drawdown_days,
+                       win_rate, profit_factor, expectancy,
+                       total_trades, avg_hold_days,
+                       status, started_at, completed_at, error_message
+                FROM backtest.runs
+                WHERE config_id = $1
+                ORDER BY started_at DESC
+                LIMIT $2
+                "#,
+            )
+            .bind(cid)
+            .bind(lim)
+            .fetch_all(self.pool())
+            .await?,
+            None => sqlx::query(
+                r#"
+                SELECT id, config_id, config_snapshot::text AS config_snapshot_json,
+                       from_date, to_date, initial_capital, final_capital,
+                       cagr, sharpe_ratio, sortino_ratio,
+                       max_drawdown, max_drawdown_days,
+                       win_rate, profit_factor, expectancy,
+                       total_trades, avg_hold_days,
+                       status, started_at, completed_at, error_message
+                FROM backtest.runs
+                ORDER BY started_at DESC
+                LIMIT $1
+                "#,
+            )
+            .bind(lim)
+            .fetch_all(self.pool())
+            .await?,
+        };
+
+        Ok(rows.into_iter().map(backtest_run_from_pg).collect())
+    }
+
+    async fn insert_backtest_trades(&self, rows: &[BacktestTradeRow]) -> StorageResult<()> {
+        for row in rows {
+            sqlx::query(
+                r#"
+                INSERT INTO backtest.trades
+                    (id, run_id, symbol, direction,
+                     entry_date, entry_price, exit_date, exit_price,
+                     shares, gross_pnl, commission, net_pnl, hold_days)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                ON CONFLICT (id) DO NOTHING
+                "#,
+            )
+            .bind(row.id)
+            .bind(row.run_id)
+            .bind(&row.symbol)
+            .bind(&row.direction)
+            .bind(row.entry_date)
+            .bind(row.entry_price)
+            .bind(row.exit_date)
+            .bind(row.exit_price)
+            .bind(row.shares)
+            .bind(row.gross_pnl)
+            .bind(row.commission)
+            .bind(row.net_pnl)
+            .bind(row.hold_days)
+            .execute(self.pool())
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn get_backtest_trades(&self, run_id: Uuid) -> StorageResult<Vec<BacktestTradeRow>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, run_id, symbol, direction,
+                   entry_date, entry_price, exit_date, exit_price,
+                   shares, gross_pnl, commission, net_pnl, hold_days
+            FROM backtest.trades
+            WHERE run_id = $1
+            ORDER BY entry_date ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(self.pool())
+        .await?;
+
+        Ok(rows.into_iter().map(backtest_trade_from_pg).collect())
+    }
+
+    async fn insert_equity_curve(&self, points: &[EquityCurvePoint]) -> StorageResult<()> {
+        for p in points {
+            sqlx::query(
+                r#"
+                INSERT INTO backtest.equity_curve
+                    (run_id, date, portfolio_value, cash, drawdown)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (run_id, date) DO UPDATE
+                    SET portfolio_value = EXCLUDED.portfolio_value,
+                        cash            = EXCLUDED.cash,
+                        drawdown        = EXCLUDED.drawdown
+                "#,
+            )
+            .bind(p.run_id)
+            .bind(p.date)
+            .bind(p.portfolio_value)
+            .bind(p.cash)
+            .bind(p.drawdown)
+            .execute(self.pool())
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn get_equity_curve(&self, run_id: Uuid) -> StorageResult<Vec<EquityCurvePoint>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT run_id, date, portfolio_value, cash, drawdown
+            FROM backtest.equity_curve
+            WHERE run_id = $1
+            ORDER BY date ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(self.pool())
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| EquityCurvePoint {
+                run_id: row.get("run_id"),
+                date: row.get("date"),
+                portfolio_value: row.get("portfolio_value"),
+                cash: row.get("cash"),
+                drawdown: row.get("drawdown"),
+            })
+            .collect())
+    }
+}
+
+// ── Backtest row mappers ──────────────────────────────────────────────────────
+
+fn backtest_run_from_pg(row: sqlx::postgres::PgRow) -> BacktestRunRow {
+    BacktestRunRow {
+        id: row.get("id"),
+        config_id: row.get("config_id"),
+        config_snapshot_json: row.get("config_snapshot_json"),
+        from_date: row.get("from_date"),
+        to_date: row.get("to_date"),
+        initial_capital: row.get("initial_capital"),
+        final_capital: row.get("final_capital"),
+        cagr: row.get("cagr"),
+        sharpe_ratio: row.get("sharpe_ratio"),
+        sortino_ratio: row.get("sortino_ratio"),
+        max_drawdown: row.get("max_drawdown"),
+        max_drawdown_days: row.get("max_drawdown_days"),
+        win_rate: row.get("win_rate"),
+        profit_factor: row.get("profit_factor"),
+        expectancy: row.get("expectancy"),
+        total_trades: row.get("total_trades"),
+        avg_hold_days: row.get("avg_hold_days"),
+        status: row.get("status"),
+        started_at: row.get("started_at"),
+        completed_at: row.get("completed_at"),
+        error_message: row.get("error_message"),
+    }
+}
+
+fn backtest_trade_from_pg(row: sqlx::postgres::PgRow) -> BacktestTradeRow {
+    BacktestTradeRow {
+        id: row.get("id"),
+        run_id: row.get("run_id"),
+        symbol: row.get("symbol"),
+        direction: row.get("direction"),
+        entry_date: row.get("entry_date"),
+        entry_price: row.get("entry_price"),
+        exit_date: row.get("exit_date"),
+        exit_price: row.get("exit_price"),
+        shares: row.get("shares"),
+        gross_pnl: row.get("gross_pnl"),
+        commission: row.get("commission"),
+        net_pnl: row.get("net_pnl"),
+        hold_days: row.get("hold_days"),
     }
 }

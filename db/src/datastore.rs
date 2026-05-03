@@ -15,7 +15,8 @@
 
 use crate::{StorageError, StorageResult};
 use crate::storage::{
-    CandleStorage, DuckDatabase, MacroSeriesPoint, MacroStorage, MetadataStorage,
+    BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, DuckDatabase,
+    EquityCurvePoint, MacroSeriesPoint, MacroStorage, MetadataStorage,
     PortfolioState, PortfolioStorage, PostgresStorage,
     StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage,
     TickStorage, TickerQuery,
@@ -440,6 +441,39 @@ impl StrategyStorage for DataStore {
     }
     async fn get_strategy_signal(&self, id: Uuid) -> StorageResult<Option<StrategySignalRow>> {
         self.require_pg()?.get_strategy_signal(id).await
+    }
+}
+
+// ── BacktestStorage — writes and reads via PostgreSQL ────────────────────────
+
+impl BacktestStorage for DataStore {
+    async fn insert_backtest_run(&self, row: &BacktestRunRow) -> StorageResult<()> {
+        self.require_pg()?.insert_backtest_run(row).await
+    }
+    async fn complete_backtest_run(&self, row: &BacktestRunRow) -> StorageResult<()> {
+        self.require_pg()?.complete_backtest_run(row).await
+    }
+    async fn get_backtest_run(&self, id: Uuid) -> StorageResult<Option<BacktestRunRow>> {
+        self.require_pg()?.get_backtest_run(id).await
+    }
+    async fn list_backtest_runs(
+        &self,
+        config_id: Option<Uuid>,
+        limit: Option<u32>,
+    ) -> StorageResult<Vec<BacktestRunRow>> {
+        self.require_pg()?.list_backtest_runs(config_id, limit).await
+    }
+    async fn insert_backtest_trades(&self, rows: &[BacktestTradeRow]) -> StorageResult<()> {
+        self.require_pg()?.insert_backtest_trades(rows).await
+    }
+    async fn get_backtest_trades(&self, run_id: Uuid) -> StorageResult<Vec<BacktestTradeRow>> {
+        self.require_pg()?.get_backtest_trades(run_id).await
+    }
+    async fn insert_equity_curve(&self, points: &[EquityCurvePoint]) -> StorageResult<()> {
+        self.require_pg()?.insert_equity_curve(points).await
+    }
+    async fn get_equity_curve(&self, run_id: Uuid) -> StorageResult<Vec<EquityCurvePoint>> {
+        self.require_pg()?.get_equity_curve(run_id).await
     }
 }
 

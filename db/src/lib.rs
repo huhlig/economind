@@ -9,7 +9,8 @@ pub mod storage;
 pub use self::error::*;
 pub use self::datastore::DataStore;
 pub use self::storage::{
-    CandleStorage, DuckDatabase, MacroSeriesPoint, MacroStorage, MetadataStorage,
+    BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, DuckDatabase,
+    EquityCurvePoint, MacroSeriesPoint, MacroStorage, MetadataStorage,
     OpenPosition, PortfolioState, PortfolioStorage, PostgresStorage,
     StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage,
     TickStorage, TickerQuery,

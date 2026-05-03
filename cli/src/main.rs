@@ -15,6 +15,8 @@
 //! economind ingest    bars          [--since <date>] [--concurrency <n>]
 //! economind ingest    macro         [--since <date>] [--series <ids>]
 //! economind ingest    fundamentals  [--edgar-only] [--simfin-only]
+//! economind backtest  run           --strategy <uuid> --from <date> --to <date>
+//! economind backtest  list          [--strategy <uuid>] [--limit <n>]
 //! ```
 
 mod commands;
@@ -51,7 +53,9 @@ enum Commands {
 
     /// On-demand data ingestion (bars, macro, fundamentals).
     Ingest(commands::ingest::IngestArgs),
-    // TODO: Phase 4 — add `backtest` subcommand
+
+    /// Run a historical backtest or list past backtest runs.
+    Backtest(commands::backtest::BacktestArgs),
     // TODO: Phase 7 — add `analyze` subcommand
 }
 
@@ -87,6 +91,14 @@ async fn main() -> anyhow::Result<()> {
                     "DATABASE_URL must be set (via --database-url or environment)"
                 ))?;
             commands::ingest::execute(args, &db_url, &cli.duckdb_path).await?;
+        }
+        Commands::Backtest(args) => {
+            let db_url = cli
+                .database_url
+                .ok_or_else(|| anyhow::anyhow!(
+                    "DATABASE_URL must be set (via --database-url or environment)"
+                ))?;
+            commands::backtest::execute(args, &db_url, &cli.duckdb_path).await?;
         }
     }
 

@@ -11,6 +11,7 @@ mod traits;
 pub use self::duckdb::DuckDatabase;
 pub use self::postgres::PostgresStorage;
 pub use self::strategy_traits::{
+    BacktestRunRow, BacktestStorage, BacktestTradeRow, EquityCurvePoint,
     MacroSeriesPoint, MacroStorage, OpenPosition, PortfolioState, PortfolioStorage,
     StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage,
 };

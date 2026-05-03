@@ -23,6 +23,9 @@
 | **3.C** SEC EDGAR connector | ✅ Complete | `EdgarConnector`: XBRL company facts → IS/BS/CF; CIK lookup cache from SEC tickers JSON |
 | **3.D** SimFin connector | ✅ Complete | `SimFinConnector`: v3 columnar response parser → IS/BS/CF |
 | **3.E** Ingestion orchestration | ✅ Complete | `DataFeedManager` with `run_bars`/`run_macro`/`run_fundamentals`/`run_job_by_name`; `economind ingest` CLI subcommand |
+| **4.A** Backtest simulation loop | ✅ Complete | `BacktestRunner` + `SimPortfolio`; no-lookahead context, slippage/commission, max-hold-days forced exit, end-of-run close-all |
+| **4.B** Performance metrics | ✅ Complete | `PerformanceMetrics`: CAGR, Sharpe, Sortino, max drawdown + duration, win rate, profit factor, expectancy, avg hold, largest win/loss |
+| **4.C** CLI wiring (backtest) | ✅ Complete | `economind backtest run` + `economind backtest list`; formatted summary table; `BacktestStorage` trait + PG impl + DataStore facade |
 
 ---
 

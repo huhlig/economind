@@ -2,12 +2,10 @@
 // Copyright (C) Hans W. Uhlig - All Rights Reserved
 //
 
-//! Storage traits for strategy configs, runs, and signals (Phase 2).
+//! Storage traits for strategy configs, runs, signals, and backtest results (Phases 2 & 4).
 //!
 //! These traits are implemented by `PostgresStorage` (authoritative writes) and
-//! forwarded through `DataStore`.  The `DataStore` routes writes to Postgres and
-//! reads to Postgres as well (strategy data is small enough that DuckDB mirroring
-//! is not needed until Phase 4 backtest work begins).
+//! forwarded through `DataStore`.
 
 use crate::StorageResult;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -160,4 +158,103 @@ pub trait StrategyStorage: Send + Sync {
         limit: Option<u32>,
     ) -> StorageResult<Vec<StrategySignalRow>>;
     async fn get_strategy_signal(&self, id: Uuid) -> StorageResult<Option<StrategySignalRow>>;
+}
+
+// ── BacktestStorage ───────────────────────────────────────────────────────────
+
+/// Serialised backtest run row (matches `backtest.runs`).
+#[derive(Debug, Clone)]
+pub struct BacktestRunRow {
+    pub id: Uuid,
+    pub config_id: Uuid,
+    /// JSON snapshot of the StrategyConfig at the time of the run.
+    pub config_snapshot_json: String,
+    pub from_date: NaiveDate,
+    pub to_date: NaiveDate,
+    pub initial_capital: Decimal,
+    pub final_capital: Option<Decimal>,
+    // ── Performance metrics ───────────────────────────────────────────────────
+    pub cagr: Option<Decimal>,
+    pub sharpe_ratio: Option<Decimal>,
+    pub sortino_ratio: Option<Decimal>,
+    pub max_drawdown: Option<Decimal>,
+    pub max_drawdown_days: Option<i32>,
+    pub win_rate: Option<Decimal>,
+    pub profit_factor: Option<Decimal>,
+    pub expectancy: Option<Decimal>,
+    pub total_trades: Option<i32>,
+    pub avg_hold_days: Option<Decimal>,
+    // ── Run lifecycle ─────────────────────────────────────────────────────────
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub error_message: Option<String>,
+}
+
+/// Serialised backtest trade row (matches `backtest.trades`).
+#[derive(Debug, Clone)]
+pub struct BacktestTradeRow {
+    pub id: Uuid,
+    pub run_id: Uuid,
+    pub symbol: String,
+    /// `"long"` or `"short"`.
+    pub direction: String,
+    pub entry_date: NaiveDate,
+    pub entry_price: Decimal,
+    pub exit_date: Option<NaiveDate>,
+    pub exit_price: Option<Decimal>,
+    pub shares: Decimal,
+    pub gross_pnl: Option<Decimal>,
+    pub commission: Decimal,
+    pub net_pnl: Option<Decimal>,
+    pub hold_days: Option<i32>,
+}
+
+/// A single point on the equity curve (matches `backtest.equity_curve`).
+#[derive(Debug, Clone)]
+pub struct EquityCurvePoint {
+    pub run_id: Uuid,
+    pub date: NaiveDate,
+    pub portfolio_value: Decimal,
+    pub cash: Decimal,
+    /// Drawdown from peak expressed as a fraction (0.0 – 1.0).
+    pub drawdown: Decimal,
+}
+
+/// Trait for persisting and reading backtest runs, trades, and equity curves.
+#[allow(async_fn_in_trait)]
+pub trait BacktestStorage: Send + Sync {
+    // ── Runs ──────────────────────────────────────────────────────────────────
+
+    /// Insert a new backtest run record (status = 'running').
+    async fn insert_backtest_run(&self, row: &BacktestRunRow) -> StorageResult<()>;
+
+    /// Update a run to 'completed' or 'failed', filling in all metric fields.
+    async fn complete_backtest_run(&self, row: &BacktestRunRow) -> StorageResult<()>;
+
+    /// Fetch a single backtest run by ID.
+    async fn get_backtest_run(&self, id: Uuid) -> StorageResult<Option<BacktestRunRow>>;
+
+    /// List backtest runs, optionally filtered by strategy config ID, newest first.
+    async fn list_backtest_runs(
+        &self,
+        config_id: Option<Uuid>,
+        limit: Option<u32>,
+    ) -> StorageResult<Vec<BacktestRunRow>>;
+
+    // ── Trades ────────────────────────────────────────────────────────────────
+
+    /// Bulk-insert simulated trades for a backtest run.
+    async fn insert_backtest_trades(&self, rows: &[BacktestTradeRow]) -> StorageResult<()>;
+
+    /// Fetch all trades for a backtest run.
+    async fn get_backtest_trades(&self, run_id: Uuid) -> StorageResult<Vec<BacktestTradeRow>>;
+
+    // ── Equity curve ──────────────────────────────────────────────────────────
+
+    /// Bulk-insert equity curve points for a backtest run.
+    async fn insert_equity_curve(&self, points: &[EquityCurvePoint]) -> StorageResult<()>;
+
+    /// Fetch the full equity curve for a backtest run (sorted by date asc).
+    async fn get_equity_curve(&self, run_id: Uuid) -> StorageResult<Vec<EquityCurvePoint>>;
 }

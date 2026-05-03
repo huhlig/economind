@@ -12,11 +12,14 @@ economind-core     = { workspace = true }
 economind-db       = { workspace = true }
 economind-ingest   = { workspace = true }
 economind-strategy = { workspace = true }
+economind-backtest = { workspace = true }
 
-# Phase 2 strategy plugins
+# Strategy plugins
 strategy-momentum       = { workspace = true }
 strategy-mean-reversion = { workspace = true }
 strategy-atr-sizer      = { workspace = true }
+
+rust_decimal = { workspace = true }
 
 anyhow       = { workspace = true }
 chrono       = { workspace = true }
