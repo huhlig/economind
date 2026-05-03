@@ -114,12 +114,27 @@ impl FundamentalsProvider for SimFinConnector {
                 let cogs = find_value(&stmt.data, "Cost of Revenue").unwrap_or(Decimal::ZERO);
                 let op_income =
                     find_value(&stmt.data, "Operating Income (Loss)").unwrap_or(Decimal::ZERO);
+                let net_income =
+                    find_value(&stmt.data, "Net Income").unwrap_or(Decimal::ZERO);
+                let interest_expense =
+                    find_value(&stmt.data, "Interest Expense, Net").unwrap_or(Decimal::ZERO);
+                let tax_expense =
+                    find_value(&stmt.data, "Income Tax (Expense) Benefit, Net")
+                        .unwrap_or(Decimal::ZERO);
+                let eps =
+                    find_value(&stmt.data, "Earnings Per Share (Diluted)").unwrap_or(Decimal::ZERO);
+                let ebit = op_income + interest_expense;
                 results.push(IncomeStatement {
                     symbol: sym.clone(),
                     period_end,
                     revenue,
                     cogs,
                     operating_income: op_income,
+                    ebit,
+                    net_income,
+                    eps,
+                    interest_expense,
+                    tax_expense,
                 });
             }
         }
@@ -148,12 +163,15 @@ impl FundamentalsProvider for SimFinConnector {
                     find_value(&stmt.data, "Total Debt").unwrap_or(Decimal::ZERO);
                 let total_equity =
                     find_value(&stmt.data, "Total Equity").unwrap_or(Decimal::ZERO);
+                let cash =
+                    find_value(&stmt.data, "Cash & Cash Equivalents").unwrap_or(Decimal::ZERO);
                 results.push(BalanceSheet {
                     symbol: sym.clone(),
                     period_end,
                     total_assets,
                     total_debt,
                     total_equity,
+                    cash,
                 });
             }
         }

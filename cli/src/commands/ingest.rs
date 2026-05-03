@@ -131,7 +131,7 @@ async fn run_bars(args: BarsArgs, store: &DataStore) -> anyhow::Result<()> {
 
 async fn run_macro(args: MacroArgs, store: &DataStore) -> anyhow::Result<()> {
     let fred = FredConnector::from_env()
-        .context("Failed to create FRED connector — is FRED_API_KEY set?")?;
+        .map_err(|e| anyhow::anyhow!("Failed to create FRED connector — is FRED_API_KEY set? {e}"))?;
 
     let config = DataFeedManagerConfig {
         fred_series: args.series.clone(),

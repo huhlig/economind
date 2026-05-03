@@ -78,6 +78,7 @@ impl CikCache {
         self.inner.write().await.insert(ticker.to_uppercase(), cik);
     }
 
+    #[allow(dead_code)]
     pub async fn len(&self) -> usize {
         self.inner.read().await.len()
     }
@@ -202,22 +203,40 @@ impl FundamentalsProvider for EdgarConnector {
             &["CostOfGoodsSoldAndServicesSold", "CostOfRevenue", "CostOfGoodsSold"],
         );
         let op_income = pick_concept(&gaap, &["OperatingIncomeLoss"]);
+        let net_income = pick_concept(&gaap, &["NetIncomeLoss"]);
+        let interest_exp = pick_concept(&gaap, &["InterestExpense", "InterestAndDebtExpense"]);
+        let tax_exp = pick_concept(&gaap, &["IncomeTaxExpenseBenefit"]);
+        let eps = pick_concept(&gaap, &["EarningsPerShareDiluted", "EarningsPerShareBasic"]);
 
         // Build a date-keyed map from operating income (the most reliably present).
         let op_map = annual_value_map(op_income);
         let rev_map = annual_value_map(revenues);
         let cogs_map = annual_value_map(cogs);
+        let net_map = annual_value_map(net_income);
+        let int_map = annual_value_map(interest_exp);
+        let tax_map = annual_value_map(tax_exp);
+        let eps_map = annual_value_map(eps);
 
         let mut stmts = Vec::new();
         for (period_end, op) in &op_map {
             let revenue = rev_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
             let cogs_val = cogs_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
+            let net_income_val = net_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
+            let interest_expense = int_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
+            let tax_expense = tax_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
+            let eps_val = eps_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
+            let ebit = *op + interest_expense;
             stmts.push(IncomeStatement {
                 symbol: sym.clone(),
                 period_end: *period_end,
                 revenue,
                 cogs: cogs_val,
                 operating_income: *op,
+                ebit,
+                net_income: net_income_val,
+                eps: eps_val,
+                interest_expense,
+                tax_expense,
             });
         }
         stmts.sort_by_key(|s| s.period_end);
@@ -247,20 +266,28 @@ impl FundamentalsProvider for EdgarConnector {
             ],
         );
 
+        let cash = pick_concept(
+            &gaap,
+            &["CashAndCashEquivalentsAtCarryingValue", "CashAndCashEquivalents"],
+        );
+
         let assets_map = annual_value_map(assets);
         let debt_map = annual_value_map(debt);
         let equity_map = annual_value_map(equity);
+        let cash_map = annual_value_map(cash);
 
         let mut sheets = Vec::new();
         for (period_end, total_assets) in &assets_map {
             let total_debt = debt_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
             let total_equity = equity_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
+            let cash_val = cash_map.get(period_end).copied().unwrap_or(Decimal::ZERO);
             sheets.push(BalanceSheet {
                 symbol: sym.clone(),
                 period_end: *period_end,
                 total_assets: *total_assets,
                 total_debt,
                 total_equity,
+                cash: cash_val,
             });
         }
         sheets.sort_by_key(|s| s.period_end);

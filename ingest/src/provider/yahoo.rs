@@ -100,7 +100,7 @@ impl YahooFinanceConnector {
             .asset_profile
             .as_ref()
             .and_then(|p| p.long_name.clone());
-        let sector = result
+        let _sector = result
             .asset_profile
             .as_ref()
             .and_then(|p| p.sector.clone());
@@ -256,6 +256,7 @@ fn parse_chart_result(result: ChartResult) -> ProviderResult<Vec<DailyCandleEntr
     let len = timestamps.len();
     let mut entries = Vec::with_capacity(len);
 
+    #[allow(clippy::needless_range_loop)]
     for i in 0..len {
         // Skip bars where any core field is None (Yahoo sometimes returns nulls
         // for partial trading days or extended-hours-only sessions).
