@@ -1,0 +1,14 @@
+[package]
+name = "economind-algorithms"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Internal Crates
+economind-datamodel.workspace = true
+
+# Math/Decimal Crates
+rust_decimal.workspace = true
+
+# Time/Date Crates
+chrono.workspace = true

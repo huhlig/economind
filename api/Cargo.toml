@@ -1,0 +1,20 @@
+[package]
+name = "economind-api"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "economind"
+path = "src/main.rs"
+
+[dependencies]
+economind-core     = { workspace = true }
+economind-db       = { workspace = true }
+economind-strategy = { workspace = true }
+
+chrono       = { workspace = true }
+dotenvy      = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+tokio        = { workspace = true }

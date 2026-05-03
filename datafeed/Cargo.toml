@@ -1,0 +1,41 @@
+[package]
+name = "economind-datafeed"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Internal Crates
+economind-datamodel.workspace = true
+
+# Async
+async-trait.workspace = true
+futures-core.workspace = true
+tokio.workspace = true
+
+# CLI
+clap = { workspace = true, features = ["derive", "env"] }
+chrono.workspace = true
+dotenvy.workspace = true
+
+# NonZero
+nonzero_ext.workspace = true
+
+# Networking
+governor.workspace = true
+reqwest.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+csv.workspace = true
+
+rust_decimal.workspace = true
+thiserror.workspace = true
+
+[lib]
+
+
+
+[[bin]]
+name = "datafeed"
+path = "src/bin.rs"

@@ -1,0 +1,15 @@
+[package]
+name = "strategy-momentum"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+economind-core     = { workspace = true }
+economind-strategy = { workspace = true }
+
+async-trait  = { workspace = true }
+chrono       = { workspace = true }
+rust_decimal = { workspace = true }
+serde        = { workspace = true }
+thiserror    = { workspace = true }
+tokio        = { workspace = true }

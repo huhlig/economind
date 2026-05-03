@@ -1,0 +1,14 @@
+[package]
+name = "economind-indicators"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Internal Crates
+economind-core.workspace = true
+
+# Math/Decimal Crates
+rust_decimal.workspace = true
+
+# Time/Date Crates
+chrono.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "economind-backtest"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+economind-core     = { workspace = true }
+economind-db       = { workspace = true }
+economind-strategy = { workspace = true }
+
+async-trait  = { workspace = true }
+chrono       = { workspace = true }
+rust_decimal = { workspace = true }
+serde        = { workspace = true }
+thiserror    = { workspace = true }
+tokio        = { workspace = true }
+uuid         = { workspace = true }

@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "db",
+    "indicators",
+    "ingest",
+    "strategy",
+    "backtest",
+    "api",
+    "cli",
+    "agentic",
+    "strategies/strategy-momentum",
+    "strategies/strategy-regime",
+    "strategies/strategy-mean-reversion",
+    "strategies/strategy-trend-follow",
+    "strategies/strategy-atr-sizer",
+    "strategies/strategy-kelly-sizer",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+# Internal crates
+economind-core       = { path = "core" }
+economind-db         = { path = "db" }
+economind-indicators = { path = "indicators" }
+economind-ingest     = { path = "ingest" }
+economind-strategy   = { path = "strategy" }
+economind-backtest   = { path = "backtest" }
+economind-api        = { path = "api" }
+economind-agentic    = { path = "agentic" }
+
+# Strategy plugins
+strategy-momentum        = { path = "strategies/strategy-momentum" }
+strategy-regime          = { path = "strategies/strategy-regime" }
+strategy-mean-reversion  = { path = "strategies/strategy-mean-reversion" }
+strategy-trend-follow    = { path = "strategies/strategy-trend-follow" }
+strategy-atr-sizer       = { path = "strategies/strategy-atr-sizer" }
+strategy-kelly-sizer     = { path = "strategies/strategy-kelly-sizer" }
+
+# Async runtime
+tokio        = { version = "1", features = ["full"] }
+async-trait  = { version = "0.1" }
+futures      = { version = "0.3" }
+futures-core = { version = "0.3" }
+
+# HTTP / networking
+reqwest  = { version = "0.12", features = ["json", "cookies", "rustls-tls"] }
+governor = { version = "0.10", features = ["default"] }
+
+# Database
+duckdb       = { version = "1", features = ["default"] }
+sqlx         = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "rust_decimal", "macros"] }
+rust_decimal = { version = "1", features = ["default"] }
+
+# Serialization
+serde      = { version = "1", features = ["default", "derive"] }
+serde_json = { version = "1", features = ["default"] }
+csv        = { version = "1" }
+
+# Date / time
+chrono = { version = "0.4", features = ["default", "serde"] }
+
+# Error handling
+thiserror = { version = "2" }
+anyhow    = { version = "1" }
+
+# IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# CLI
+clap     = { version = "4", features = ["derive", "env"] }
+dotenvy  = { version = "0.15" }
+
+# Misc
+nonzero_ext = "0.3"

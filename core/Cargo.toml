@@ -1,0 +1,13 @@
+[package]
+name = "economind-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait  = { workspace = true }
+chrono       = { workspace = true }
+futures-core = { workspace = true }
+rust_decimal = { workspace = true }
+serde        = { workspace = true }
+thiserror    = { workspace = true }
+uuid         = { workspace = true }
