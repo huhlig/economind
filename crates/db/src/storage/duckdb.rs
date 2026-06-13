@@ -17,7 +17,7 @@ use crate::storage::{
     BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, ChatMessageRow,
     ChatSessionRow, ChatStorage, EquityCurvePoint, MacroSeriesPoint, MacroStorage,
     MetadataStorage, OpenPosition, PortfolioState, PortfolioStorage, StrategyConfigRow,
-    StrategyRunRow, StrategySignalRow, StrategyStorage, TickStorage, TickerQuery,
+    StrategyRunRow, StrategySignalRow, StrategyStorage, TickStorage, TickerQuery, WatchItem,
 };
 use crate::StorageError;
 use crate::StorageResult;
@@ -1097,7 +1097,7 @@ impl PortfolioStorage for DuckDatabase {
 
             // Load open positions.
             let mut stmt = conn.prepare(
-                "SELECT id, symbol, shares, entry_price, entry_at \
+                "SELECT id, symbol, shares, entry_price, CAST(entry_at AS VARCHAR) \
                  FROM portfolio_positions WHERE status='open'",
             )?;
             let open_positions: Vec<OpenPosition> = stmt
@@ -1158,6 +1158,154 @@ impl PortfolioStorage for DuckDatabase {
                 available_cash: Decimal::ZERO,
                 current_drawdown,
             })
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn open_position(
+        &self,
+        symbol: &Symbol,
+        shares: Decimal,
+        entry_price: Decimal,
+        entry_at: DateTime<Utc>,
+    ) -> StorageResult<OpenPosition> {
+        let conn = self.conn.clone();
+        let sym = symbol.as_str().to_string();
+        let shares_f = shares.to_string().parse::<f64>().unwrap_or(0.0);
+        let price_f = entry_price.to_string().parse::<f64>().unwrap_or(0.0);
+        let entry_str = entry_at.to_rfc3339();
+        tokio::task::spawn_blocking(move || -> StorageResult<OpenPosition> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let id = Uuid::new_v4();
+            let id_str = id.to_string();
+            conn.execute(
+                "INSERT INTO portfolio_positions (id, symbol, shares, entry_price, entry_at, status) \
+                 VALUES (?, ?, ?, ?, ?, 'open')",
+                params![id_str, sym, shares_f, price_f, entry_str],
+            )?;
+            Ok(OpenPosition {
+                id,
+                symbol: Symbol::new(&sym),
+                shares: f2d(shares_f),
+                entry_price: f2d(price_f),
+                entry_at,
+            })
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn close_position(
+        &self,
+        id: Uuid,
+        exit_price: Decimal,
+        exit_at: DateTime<Utc>,
+    ) -> StorageResult<()> {
+        let conn = self.conn.clone();
+        let id_str = id.to_string();
+        let price_f = exit_price.to_string().parse::<f64>().unwrap_or(0.0);
+        let exit_str = exit_at.to_rfc3339();
+        tokio::task::spawn_blocking(move || -> StorageResult<()> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let rows = conn.execute(
+                "UPDATE portfolio_positions \
+                 SET status='closed', exit_price=?, exit_at=? \
+                 WHERE id=? AND status='open'",
+                params![price_f, exit_str, id_str],
+            )?;
+            if rows == 0 {
+                return Err(StorageError::Provider(format!(
+                    "Position {id_str} not found or already closed"
+                )));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn add_watch(&self, symbol: &Symbol) -> StorageResult<WatchItem> {
+        let conn = self.conn.clone();
+        let sym = symbol.as_str().to_string();
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        tokio::task::spawn_blocking(move || -> StorageResult<WatchItem> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            conn.execute(
+                "INSERT OR IGNORE INTO portfolio_watchlist (symbol, added_at) VALUES (?, ?)",
+                params![sym, now_str],
+            )?;
+            Ok(WatchItem {
+                symbol: Symbol::new(&sym),
+                added_at: now,
+            })
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn remove_watch(&self, symbol: &Symbol) -> StorageResult<()> {
+        let conn = self.conn.clone();
+        let sym = symbol.as_str().to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<()> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            conn.execute(
+                "DELETE FROM portfolio_watchlist WHERE symbol=?",
+                params![sym],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn list_watches(&self) -> StorageResult<Vec<WatchItem>> {
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || -> StorageResult<Vec<WatchItem>> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let mut stmt = conn.prepare(
+                "SELECT symbol, CAST(added_at AS VARCHAR) FROM portfolio_watchlist ORDER BY added_at DESC",
+            )?;
+            let items: Vec<WatchItem> = stmt
+                .query_map([], |row| {
+                    let sym: String = row.get(0)?;
+                    let ts: String = row.get(1)?;
+                    Ok((sym, ts))
+                })?
+                .filter_map(|r| r.ok())
+                .map(|(sym, ts)| WatchItem {
+                    symbol: Symbol::new(&sym),
+                    added_at: parse_datetime_utc(&ts),
+                })
+                .collect();
+            Ok(items)
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn get_watch(&self, symbol: &Symbol) -> StorageResult<Option<WatchItem>> {
+        let conn = self.conn.clone();
+        let sym = symbol.as_str().to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<Option<WatchItem>> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let mut stmt = conn.prepare(
+                "SELECT symbol, CAST(added_at AS VARCHAR) FROM portfolio_watchlist WHERE symbol=?",
+            )?;
+            let item = stmt
+                .query_map([sym.as_str()], |row| {
+                    let s: String = row.get(0)?;
+                    let ts: String = row.get(1)?;
+                    Ok((s, ts))
+                })?
+                .filter_map(|r| r.ok())
+                .next()
+                .map(|(s, ts)| WatchItem {
+                    symbol: Symbol::new(&s),
+                    added_at: parse_datetime_utc(&ts),
+                });
+            Ok(item)
         })
         .await
         .map_err(|e| StorageError::Provider(e.to_string()))?

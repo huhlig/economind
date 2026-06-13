@@ -10,8 +10,8 @@
 use crate::storage::{
     BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, ChatMessageRow,
     ChatSessionRow, ChatStorage, DuckDatabase, EquityCurvePoint, MacroSeriesPoint, MacroStorage,
-    MetadataStorage, PortfolioState, PortfolioStorage, StrategyConfigRow, StrategyRunRow,
-    StrategySignalRow, StrategyStorage, TickStorage, TickerQuery,
+    MetadataStorage, OpenPosition, PortfolioState, PortfolioStorage, StrategyConfigRow,
+    StrategyRunRow, StrategySignalRow, StrategyStorage, TickStorage, TickerQuery, WatchItem,
 };
 use crate::StorageResult;
 use chrono::{NaiveDate, NaiveDateTime};
@@ -228,6 +228,35 @@ impl MacroStorage for DataStore {
 impl PortfolioStorage for DataStore {
     async fn load_portfolio_state(&self) -> StorageResult<PortfolioState> {
         self.duck.load_portfolio_state().await
+    }
+    async fn open_position(
+        &self,
+        symbol: &Symbol,
+        shares: rust_decimal::Decimal,
+        entry_price: rust_decimal::Decimal,
+        entry_at: chrono::DateTime<chrono::Utc>,
+    ) -> StorageResult<OpenPosition> {
+        self.duck.open_position(symbol, shares, entry_price, entry_at).await
+    }
+    async fn close_position(
+        &self,
+        id: Uuid,
+        exit_price: rust_decimal::Decimal,
+        exit_at: chrono::DateTime<chrono::Utc>,
+    ) -> StorageResult<()> {
+        self.duck.close_position(id, exit_price, exit_at).await
+    }
+    async fn add_watch(&self, symbol: &Symbol) -> StorageResult<WatchItem> {
+        self.duck.add_watch(symbol).await
+    }
+    async fn remove_watch(&self, symbol: &Symbol) -> StorageResult<()> {
+        self.duck.remove_watch(symbol).await
+    }
+    async fn list_watches(&self) -> StorageResult<Vec<WatchItem>> {
+        self.duck.list_watches().await
+    }
+    async fn get_watch(&self, symbol: &Symbol) -> StorageResult<Option<WatchItem>> {
+        self.duck.get_watch(symbol).await
     }
 }
 

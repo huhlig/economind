@@ -11,5 +11,6 @@ pub use self::strategy_traits::{
     BacktestRunRow, BacktestStorage, BacktestTradeRow, ChatMessageRow, ChatSessionRow,
     ChatStorage, EquityCurvePoint, MacroSeriesPoint, MacroStorage, OpenPosition, PortfolioState,
     PortfolioStorage, StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage,
+    WatchItem,
 };
 pub use self::traits::{CandleStorage, MetadataStorage, TickStorage, TickerQuery};

@@ -21,9 +21,9 @@
 use chrono::NaiveDate;
 use economind_core::model::{
     BalanceSheet, CandleEntry, CashFlowStatement, DailyCandleEntry, DividendEvent, IncomeStatement,
-    Interval, NewsAbout, NewsStory, StockSplitEvent, Symbol, Ticker,
+    Interval, NewsAbout, NewsStory, StockSplitEvent, Symbol,
 };
-use economind_db::storage::{CandleStorage, DuckDatabase, MetadataStorage};
+use economind_db::storage::{CandleStorage, DuckDatabase, MetadataStorage, PortfolioStorage};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -393,4 +393,92 @@ async fn duckdb_news_round_trip() {
         db.query_news(None, None).await.unwrap().collect().await
     };
     assert_eq!(all.len(), 2, "dedup should prevent duplicates");
+}
+
+// ── Portfolio position tests ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn duckdb_open_and_close_position() {
+    use chrono::Utc;
+
+    let db = DuckDatabase::in_memory().unwrap();
+
+    let pos = db
+        .open_position(&sym("AAPL"), dec("10"), dec("180.00"), Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(pos.symbol, sym("AAPL"));
+    assert_eq!(pos.shares, dec("10"));
+    assert_eq!(pos.entry_price, dec("180.00"));
+
+    // Should appear in portfolio state
+    let state = db.load_portfolio_state().await.unwrap();
+    assert_eq!(state.open_positions.len(), 1);
+    assert_eq!(state.open_positions[0].id, pos.id);
+
+    // Close it
+    db.close_position(pos.id, dec("195.00"), Utc::now())
+        .await
+        .unwrap();
+
+    let state2 = db.load_portfolio_state().await.unwrap();
+    assert!(state2.open_positions.is_empty(), "should have no open positions after close");
+}
+
+#[tokio::test]
+async fn duckdb_close_unknown_position_errors() {
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    let db = DuckDatabase::in_memory().unwrap();
+
+    let result = db
+        .close_position(Uuid::new_v4(), dec("100.00"), Utc::now())
+        .await;
+
+    assert!(result.is_err(), "closing a non-existent position should fail");
+}
+
+// ── Watchlist tests ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn duckdb_watchlist_crud() {
+    let db = DuckDatabase::in_memory().unwrap();
+
+    // Empty initially
+    let empty = db.list_watches().await.unwrap();
+    assert!(empty.is_empty());
+
+    // Add two symbols
+    let w1 = db.add_watch(&sym("MSFT")).await.unwrap();
+    assert_eq!(w1.symbol, sym("MSFT"));
+
+    db.add_watch(&sym("NVDA")).await.unwrap();
+
+    let all = db.list_watches().await.unwrap();
+    assert_eq!(all.len(), 2);
+
+    // get_watch round-trip
+    let got = db.get_watch(&sym("MSFT")).await.unwrap();
+    assert!(got.is_some());
+    assert_eq!(got.unwrap().symbol, sym("MSFT"));
+
+    // Unknown symbol returns None
+    let missing = db.get_watch(&sym("ZZZZ")).await.unwrap();
+    assert!(missing.is_none());
+
+    // Duplicate add is a no-op
+    db.add_watch(&sym("MSFT")).await.unwrap();
+    let after_dup = db.list_watches().await.unwrap();
+    assert_eq!(after_dup.len(), 2, "duplicate add must not insert a second row");
+
+    // Remove one
+    db.remove_watch(&sym("NVDA")).await.unwrap();
+    let after_remove = db.list_watches().await.unwrap();
+    assert_eq!(after_remove.len(), 1);
+    assert_eq!(after_remove[0].symbol, sym("MSFT"));
+
+    // Remove non-existent is silent
+    db.remove_watch(&sym("ZZZZ")).await.unwrap();
 }

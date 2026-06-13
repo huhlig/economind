@@ -23,6 +23,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  return res.json() as Promise<T>;
+}
+
 async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PUT',
@@ -67,6 +76,7 @@ export interface Signal {
 }
 
 export interface Position {
+  id: string;
   symbol: string;
   quantity: number;
   average_cost: number;
@@ -80,6 +90,31 @@ export interface PortfolioSummary {
   total_equity: number;
   cash: number;
   unrealized_pnl: number;
+}
+
+export interface OpenPositionRecord {
+  id: string;
+  symbol: string;
+  shares: string;
+  entry_price: string;
+  entry_at: string;
+}
+
+export interface BuyRequest {
+  symbol: string;
+  shares: string;
+  entry_price: string;
+  entry_at?: string;
+}
+
+export interface SellRequest {
+  exit_price: string;
+  exit_at?: string;
+}
+
+export interface WatchItem {
+  symbol: string;
+  added_at: string;
 }
 
 export interface StrategyConfig {
@@ -371,6 +406,7 @@ function toPortfolioSummary(raw: BackendPortfolioSummary): PortfolioSummary {
     cash,
     unrealized_pnl: 0,
     positions: raw.open_positions.map(p => ({
+      id: p.id,
       symbol: p.symbol,
       quantity: toNumber(p.shares) ?? 0,
       average_cost: toNumber(p.entry_price) ?? 0,
@@ -383,6 +419,13 @@ function toPortfolioSummary(raw: BackendPortfolioSummary): PortfolioSummary {
 
 export const portfolio = {
   summary: () => get<BackendPortfolioSummary>('/positions').then(toPortfolioSummary),
+  buy: (req: BuyRequest) => post<OpenPositionRecord>('/positions/buy', req),
+  sell: (id: string, req: SellRequest) => post<{ status: string; id: string }>(`/positions/${id}/sell`, req),
+  listPositions: () => get<BackendPortfolioSummary>('/positions').then(r => r.open_positions),
+  // Watchlist
+  listWatches: () => get<WatchItem[]>('/watchlist'),
+  addWatch: (symbol: string) => post<WatchItem>('/watchlist', { symbol }),
+  removeWatch: (symbol: string) => del<{ status: string; symbol: string }>(`/watchlist/${encodeURIComponent(symbol)}`),
 };
 
 // ── Strategy ───────────────────────────────────────────────────────────────────

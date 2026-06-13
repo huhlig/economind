@@ -36,6 +36,8 @@ use economind_db::{
     BacktestStorage, CandleStorage, DataStore, MacroStorage, MetadataStorage, PortfolioStorage,
     StrategyStorage,
 };
+use rust_decimal::Decimal;
+use std::str::FromStr;
 use futures::StreamExt;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
@@ -95,6 +97,40 @@ pub struct QueryBarsParams {
     pub to: String,
     /// Maximum number of bars to return (default 252).
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BuyPositionParams {
+    /// Ticker symbol (e.g. "AAPL").
+    pub symbol: String,
+    /// Number of shares (positive for long, negative for short).
+    pub shares: String,
+    /// Entry price per share.
+    pub entry_price: String,
+    /// ISO 8601 timestamp. Defaults to now if omitted.
+    pub entry_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SellPositionParams {
+    /// Position UUID to close.
+    pub position_id: String,
+    /// Exit price per share.
+    pub exit_price: String,
+    /// ISO 8601 timestamp. Defaults to now if omitted.
+    pub exit_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddWatchParams {
+    /// Ticker symbol to add to the watchlist (e.g. "TSLA").
+    pub symbol: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoveWatchParams {
+    /// Ticker symbol to remove from the watchlist.
+    pub symbol: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -440,6 +476,142 @@ impl EconomindMcpServer {
         )]))
     }
 
+    // ── buy_position ──────────────────────────────────────────────────────────
+
+    #[tool(description = "\
+        Open a new position in the portfolio. \
+        Provide symbol, shares (positive = long, negative = short), entry_price, \
+        and an optional ISO 8601 entry_at timestamp (defaults to now). \
+        Returns the new position record with its UUID.")]
+    async fn buy_position(
+        &self,
+        Parameters(p): Parameters<BuyPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use chrono::{DateTime, Utc};
+
+        let symbol = economind_core::model::Symbol::new(&p.symbol);
+        let shares = Decimal::from_str(&p.shares)
+            .map_err(|_| McpError::invalid_params("Invalid shares value", None))?;
+        let entry_price = Decimal::from_str(&p.entry_price)
+            .map_err(|_| McpError::invalid_params("Invalid entry_price value", None))?;
+        let entry_at: DateTime<Utc> = p
+            .entry_at
+            .as_deref()
+            .map(|s| DateTime::parse_from_rfc3339(s).map(|dt| dt.with_timezone(&Utc)))
+            .transpose()
+            .map_err(|_| McpError::invalid_params("Invalid entry_at timestamp", None))?
+            .unwrap_or_else(Utc::now);
+
+        let pos = self
+            .store
+            .open_position(&symbol, shares, entry_price, entry_at)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let json = serde_json::json!({
+            "id":          pos.id,
+            "symbol":      pos.symbol.as_str(),
+            "shares":      pos.shares,
+            "entry_price": pos.entry_price,
+            "entry_at":    pos.entry_at,
+        });
+        Ok(CallToolResult::success(vec![Content::text(json.to_string())]))
+    }
+
+    // ── sell_position ─────────────────────────────────────────────────────────
+
+    #[tool(description = "\
+        Close an open position by its UUID. \
+        Provide the position_id (UUID), exit_price, and an optional ISO 8601 \
+        exit_at timestamp (defaults to now).")]
+    async fn sell_position(
+        &self,
+        Parameters(p): Parameters<SellPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use chrono::{DateTime, Utc};
+
+        let id = Uuid::parse_str(&p.position_id)
+            .map_err(|_| McpError::invalid_params("Invalid position_id UUID", None))?;
+        let exit_price = Decimal::from_str(&p.exit_price)
+            .map_err(|_| McpError::invalid_params("Invalid exit_price value", None))?;
+        let exit_at: DateTime<Utc> = p
+            .exit_at
+            .as_deref()
+            .map(|s| DateTime::parse_from_rfc3339(s).map(|dt| dt.with_timezone(&Utc)))
+            .transpose()
+            .map_err(|_| McpError::invalid_params("Invalid exit_at timestamp", None))?
+            .unwrap_or_else(Utc::now);
+
+        self.store
+            .close_position(id, exit_price, exit_at)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let json = serde_json::json!({ "status": "closed", "id": id });
+        Ok(CallToolResult::success(vec![Content::text(json.to_string())]))
+    }
+
+    // ── list_watches ──────────────────────────────────────────────────────────
+
+    #[tool(description = "\
+        Return the current symbol watchlist. Each entry includes the symbol \
+        and the timestamp it was added.")]
+    async fn list_watches(&self) -> Result<CallToolResult, McpError> {
+        let items = self
+            .store
+            .list_watches()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let json = serde_json::json!(items
+            .iter()
+            .map(|w| serde_json::json!({
+                "symbol":   w.symbol.as_str(),
+                "added_at": w.added_at,
+            }))
+            .collect::<Vec<_>>());
+        Ok(CallToolResult::success(vec![Content::text(json.to_string())]))
+    }
+
+    // ── add_watch ─────────────────────────────────────────────────────────────
+
+    #[tool(description = "\
+        Add a symbol to the watchlist. If the symbol is already watched \
+        the operation is a no-op and the existing entry is returned.")]
+    async fn add_watch(
+        &self,
+        Parameters(p): Parameters<AddWatchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let symbol = economind_core::model::Symbol::new(&p.symbol);
+        let item = self
+            .store
+            .add_watch(&symbol)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let json = serde_json::json!({ "symbol": item.symbol.as_str(), "added_at": item.added_at });
+        Ok(CallToolResult::success(vec![Content::text(json.to_string())]))
+    }
+
+    // ── remove_watch ──────────────────────────────────────────────────────────
+
+    #[tool(description = "\
+        Remove a symbol from the watchlist. If the symbol is not on the watchlist \
+        the operation succeeds silently.")]
+    async fn remove_watch(
+        &self,
+        Parameters(p): Parameters<RemoveWatchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let symbol = economind_core::model::Symbol::new(&p.symbol);
+        self.store
+            .remove_watch(&symbol)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let json = serde_json::json!({ "status": "removed", "symbol": p.symbol });
+        Ok(CallToolResult::success(vec![Content::text(json.to_string())]))
+    }
+
     // ── analyze_signal ────────────────────────────────────────────────────────
 
     #[tool(description = "\
@@ -505,7 +677,8 @@ impl ServerHandler for EconomindMcpServer {
                 "Economind MCP server — low-frequency trading analysis platform. \
              Available tools: get_signals, get_instrument, get_portfolio, \
              get_backtest_summary, trigger_strategy_run, query_bars, \
-             get_macro_context, analyze_signal, analyze_instrument."
+             get_macro_context, analyze_signal, analyze_instrument, \
+             buy_position, sell_position, list_watches, add_watch, remove_watch."
                     .to_string(),
             )
     }

@@ -67,11 +67,42 @@ pub struct PortfolioState {
     pub current_drawdown: Decimal,
 }
 
+/// A symbol on the user's watch list.
+#[derive(Debug, Clone)]
+pub struct WatchItem {
+    pub symbol: Symbol,
+    pub added_at: DateTime<Utc>,
+}
+
 /// Trait for reading portfolio state (written by the broker / execution layer).
 #[allow(async_fn_in_trait)]
 pub trait PortfolioStorage: Send + Sync {
     /// Load the current portfolio state for building StrategyContext.
     async fn load_portfolio_state(&self) -> StorageResult<PortfolioState>;
+
+    /// Open a new long or short position.
+    async fn open_position(
+        &self,
+        symbol: &Symbol,
+        shares: Decimal,
+        entry_price: Decimal,
+        entry_at: DateTime<Utc>,
+    ) -> StorageResult<OpenPosition>;
+
+    /// Close an open position by ID.
+    async fn close_position(
+        &self,
+        id: Uuid,
+        exit_price: Decimal,
+        exit_at: DateTime<Utc>,
+    ) -> StorageResult<()>;
+
+    // ── Watchlist ─────────────────────────────────────────────────────────────
+
+    async fn add_watch(&self, symbol: &Symbol) -> StorageResult<WatchItem>;
+    async fn remove_watch(&self, symbol: &Symbol) -> StorageResult<()>;
+    async fn list_watches(&self) -> StorageResult<Vec<WatchItem>>;
+    async fn get_watch(&self, symbol: &Symbol) -> StorageResult<Option<WatchItem>>;
 }
 
 // ── StrategyStorage ───────────────────────────────────────────────────────────

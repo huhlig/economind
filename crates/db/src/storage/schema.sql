@@ -237,6 +237,13 @@ CREATE TABLE IF NOT EXISTS portfolio_equity (
     peak_value      DOUBLE NOT NULL
 );
 
+-- ── Portfolio watchlist ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS portfolio_watchlist (
+    symbol      TEXT PRIMARY KEY,
+    added_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 -- ── Agent chat sessions ─────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
