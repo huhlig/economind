@@ -185,7 +185,7 @@ impl Default for LlmConfig {
         Self {
             provider: "auto".to_string(),
             anthropic_model: "claude-haiku-4-5".to_string(),
-            local_base_url: "http://localhost:11434/v1".to_string(),
+            local_base_url: "http://localhost:11434".to_string(),
             local_model: "llama3".to_string(),
         }
     }

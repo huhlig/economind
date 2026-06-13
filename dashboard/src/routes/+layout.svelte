@@ -90,9 +90,12 @@
       </div>
     </nav>
 
-    <main class="flex-1 overflow-y-auto" style="background: var(--color-bg-primary)">
+    <main class="flex-1 min-w-0 overflow-y-auto" style="background: var(--color-bg-primary)">
       {@render children()}
     </main>
-    <AgentChat />
+    <aside class="w-80 shrink-0 flex flex-col overflow-hidden"
+           style="border-left: 1px solid var(--color-border); background: var(--color-bg-sidebar);">
+      <AgentChat />
+    </aside>
   </div>
 {/if}

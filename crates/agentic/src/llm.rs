@@ -175,9 +175,13 @@ pub struct LocalBackend {
 
 impl LocalBackend {
     pub fn new(base_url: String, model: String) -> Self {
+        let base_url = base_url
+            .trim_end_matches('/')
+            .trim_end_matches("/v1")
+            .to_string();
         Self {
             client: reqwest::Client::new(),
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url,
             model,
         }
     }

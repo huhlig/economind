@@ -60,18 +60,10 @@
     finally { llmModelsLoading = false; }
   }
 
-  let llmTesting = $state(false);
   let llmTestResult = $state<{ ok: boolean; message?: string; error?: string } | null>(null);
 
-  async function testLlmConnection() {
-    llmTesting = true; llmTestResult = null;
-    try { llmTestResult = await settings.testLlm(); }
-    catch (e) { llmTestResult = { ok: false, error: readableError(e) }; }
-    finally { llmTesting = false; }
-  }
-
   async function saveLlmSettings() {
-    llmSaving = true; llmError = null;
+    llmSaving = true; llmError = null; llmTestResult = null;
     try {
       llm = await settings.updateLlm({
         provider: llm.provider,
@@ -80,8 +72,7 @@
         local_model: llm.local_model,
       });
       await refreshModels();
-      llmSaved = true;
-      setTimeout(() => (llmSaved = false), 2000);
+      llmTestResult = await settings.testLlm();
     } catch (e) { llmError = readableError(e); }
     finally { llmSaving = false; }
   }
@@ -356,13 +347,8 @@
       <div class="flex items-center gap-3">
         <button onclick={saveLlmSettings} disabled={llmSaving} class="px-5 py-2 rounded-lg text-sm font-medium"
           style="background: var(--color-accent-blue); color: white; opacity: {llmSaving ? 0.5 : 1};">
-          {llmSaving ? 'Saving...' : 'Save LLM'}
+          {llmSaving ? 'Saving & testing...' : 'Save & Test'}
         </button>
-        <button onclick={testLlmConnection} disabled={llmTesting} class="px-5 py-2 rounded-lg text-sm font-medium"
-          style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); opacity: {llmTesting ? 0.5 : 1};">
-          {llmTesting ? 'Testing...' : 'Test Connection'}
-        </button>
-        {#if llmSaved}<span class="text-sm" style="color: var(--color-accent-green)">Saved ✓</span>{/if}
       </div>
     {/if}
   </div>

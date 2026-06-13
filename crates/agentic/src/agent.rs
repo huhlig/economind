@@ -19,7 +19,6 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use reqwest::header::CONTENT_TYPE;
 use chrono::NaiveDate;
 use economind_core::model::{DailyCandleEntry, Symbol};
 use economind_db::{
@@ -30,7 +29,7 @@ use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::message::{AssistantContent, Message, Text, UserContent};
 use rig::completion::{Chat, ToolDefinition};
 use rig::one_or_many::OneOrMany;
-use rig::providers::anthropic;
+use rig::providers::{anthropic, ollama};
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -414,70 +413,183 @@ pub trait ChatAgent: Send + Sync {
     fn list_personas(&self) -> Vec<(String, String, String)>;
 }
 
-// ── LocalChatAgent ────────────────────────────────────────────────────────────
+// ── LocalAgentChatService ─────────────────────────────────────────────────────
 
-/// Simple chat agent backed by any OpenAI-compatible local server (e.g. Ollama).
-/// Does not use rig or tool calling.
-pub struct LocalChatAgent {
-    client: reqwest::Client,
-    base_url: String,
+/// Chat agent backed by any OpenAI-compatible local server (e.g. Ollama).
+/// Uses rig's Ollama provider with full tool-calling support.
+pub struct LocalAgentChatService {
+    store: DataStore,
+    client: ollama::Client,
     model: String,
+    pub personas: PersonaRegistry,
 }
 
-impl LocalChatAgent {
-    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
-        let base_url = base_url.into().trim_end_matches('/').to_string();
+impl LocalAgentChatService {
+    pub fn new(store: DataStore, base_url: impl Into<String>, model: impl Into<String>) -> Self {
+        let raw = base_url.into();
+        // Normalise: strip trailing slash, then strip trailing /v1 so callers
+        // can pass either "http://host:11434" or "http://host:11434/v1".
+        let normalized = raw
+            .trim_end_matches('/')
+            .trim_end_matches("/v1")
+            .to_string();
+
+        let client = ollama::Client::builder()
+            .api_key(rig::client::Nothing)
+            .base_url(&normalized)
+            .build()
+            .expect("Ollama client should build");
+
+        let personas = PersonaRegistry::with_builtins();
+        let personas_dir = std::env::var("PERSONAS_DIR").unwrap_or_else(|_| "personas".to_string());
+        let (loaded, errors) = personas.load_dir(&personas_dir);
+        if !loaded.is_empty() {
+            info!(
+                "Loaded {} persona(s) from {personas_dir}: {}",
+                loaded.len(),
+                loaded.join(", ")
+            );
+        }
+        for e in errors {
+            warn!("Persona load error: {e}");
+        }
+
         Self {
-            client: reqwest::Client::new(),
-            base_url,
+            store,
+            client,
             model: model.into(),
+            personas,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl ChatAgent for LocalChatAgent {
+impl ChatAgent for LocalAgentChatService {
     async fn chat(&self, message: &str, history: Vec<ChatMessage>) -> Result<String> {
-        let mut messages: Vec<serde_json::Value> = history
-            .into_iter()
-            .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
-            .collect();
-        messages.push(serde_json::json!({"role": "user", "content": message}));
+        use rig::completion::message::{AssistantContent, Text};
 
-        let url = format!("{}/v1/chat/completions", self.base_url);
-        let body = serde_json::json!({"model": self.model, "messages": messages});
-
-        let resp = self
+        let agent = self
             .client
-            .post(&url)
-            .header(CONTENT_TYPE, "application/json")
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<serde_json::Value>()
-            .await?;
+            .agent(&self.model)
+            .preamble(SYSTEM_PROMPT)
+            .tool(GetSignalsTool { store: self.store.clone() })
+            .tool(GetInstrumentTool { store: self.store.clone() })
+            .tool(GetPortfolioTool { store: self.store.clone() })
+            .tool(QueryBarsTool { store: self.store.clone() })
+            .tool(GetMacroContextTool { store: self.store.clone() })
+            .max_tokens(4096)
+            .build();
 
-        let text = resp["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Unexpected local LLM response: {resp}"))?
-            .to_string();
+        let mut rig_history: Vec<Message> = history
+            .into_iter()
+            .map(|m| {
+                if m.role == "assistant" {
+                    Message::Assistant {
+                        id: None,
+                        content: OneOrMany::one(AssistantContent::Text(Text::new(m.content))),
+                    }
+                } else {
+                    user_msg(m.content)
+                }
+            })
+            .collect();
 
-        Ok(text)
+        let reply = agent
+            .chat(user_msg(message), &mut rig_history)
+            .await
+            .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?;
+
+        Ok(reply)
     }
 
     async fn chat_as(
         &self,
-        _persona_id: &str,
+        persona_id: &str,
         message: &str,
         history: Vec<ChatMessage>,
-        _ctx: DisclosureContext,
+        ctx: DisclosureContext,
     ) -> Result<String> {
-        self.chat(message, history).await
+        use crate::persona::ToolSpec;
+        use rig::completion::message::{AssistantContent, Text};
+
+        let persona = self
+            .personas
+            .get(persona_id)
+            .ok_or_else(|| anyhow::anyhow!("Unknown persona: {persona_id}"))?;
+
+        let preamble = persona.preamble();
+        let active = persona.active_tools(&ctx);
+
+        let level = if active.contains(&ToolSpec::GetPortfolio) && active.contains(&ToolSpec::GetSignals) {
+            2
+        } else if active.contains(&ToolSpec::GetSignals) || active.contains(&ToolSpec::QueryBars) {
+            1
+        } else {
+            0
+        };
+
+        let mut rig_history: Vec<Message> = history
+            .into_iter()
+            .map(|m| {
+                if m.role == "assistant" {
+                    Message::Assistant {
+                        id: None,
+                        content: OneOrMany::one(AssistantContent::Text(Text::new(m.content))),
+                    }
+                } else {
+                    user_msg(m.content)
+                }
+            })
+            .collect();
+
+        let prompt = user_msg(message);
+
+        let reply = match level {
+            0 => self
+                .client
+                .agent(&self.model)
+                .preamble(&preamble)
+                .tool(GetInstrumentTool { store: self.store.clone() })
+                .tool(GetMacroContextTool { store: self.store.clone() })
+                .max_tokens(4096)
+                .build()
+                .chat(prompt, &mut rig_history)
+                .await
+                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+            1 => self
+                .client
+                .agent(&self.model)
+                .preamble(&preamble)
+                .tool(GetInstrumentTool { store: self.store.clone() })
+                .tool(GetMacroContextTool { store: self.store.clone() })
+                .tool(GetSignalsTool { store: self.store.clone() })
+                .tool(QueryBarsTool { store: self.store.clone() })
+                .max_tokens(4096)
+                .build()
+                .chat(prompt, &mut rig_history)
+                .await
+                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+            _ => self
+                .client
+                .agent(&self.model)
+                .preamble(&preamble)
+                .tool(GetInstrumentTool { store: self.store.clone() })
+                .tool(GetMacroContextTool { store: self.store.clone() })
+                .tool(GetSignalsTool { store: self.store.clone() })
+                .tool(QueryBarsTool { store: self.store.clone() })
+                .tool(GetPortfolioTool { store: self.store.clone() })
+                .max_tokens(4096)
+                .build()
+                .chat(prompt, &mut rig_history)
+                .await
+                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+        };
+
+        Ok(reply)
     }
 
     fn list_personas(&self) -> Vec<(String, String, String)> {
-        vec![]
+        self.personas.list_visible()
     }
 }
 

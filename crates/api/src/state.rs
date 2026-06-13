@@ -5,7 +5,7 @@
 //! Shared application state injected into every handler via Axum extractors.
 
 use crate::events::EventBus;
-use economind_agentic::{ChatAgent, ChatService, LocalChatAgent};
+use economind_agentic::{ChatAgent, ChatService, LocalAgentChatService, PersonaRegistry};
 use economind_config::LlmConfig;
 use economind_db::DataStore;
 use std::sync::Arc;
@@ -24,6 +24,8 @@ struct Inner {
     pub store: DataStore,
     pub api_key: String,
     pub event_bus: EventBus,
+    /// Always populated — independent of LLM availability.
+    pub personas: PersonaRegistry,
     /// Present when an LLM backend is configured.
     pub chat_agent: RwLock<Option<Arc<dyn ChatAgent>>>,
 }
@@ -34,6 +36,7 @@ impl AppState {
             .map_err(|e| anyhow::anyhow!("DataStore open failed: {e}"))?;
 
         let chat_service = build_chat_service(&store).await?;
+        let personas = build_persona_registry();
 
         let (tx, _) = broadcast::channel(EVENT_BUS_CAPACITY);
         let event_bus = EventBus::new(tx);
@@ -43,6 +46,7 @@ impl AppState {
                 store,
                 api_key,
                 event_bus,
+                personas,
                 chat_agent: RwLock::new(chat_service),
             }),
         })
@@ -60,6 +64,11 @@ impl AppState {
         &self.inner.event_bus
     }
 
+    /// Always-available persona registry (populated regardless of LLM config).
+    pub fn personas(&self) -> &PersonaRegistry {
+        &self.inner.personas
+    }
+
     /// Returns the chat agent, or `None` if no LLM backend is configured.
     pub async fn chat_agent(&self) -> Option<Arc<dyn ChatAgent>> {
         self.inner.chat_agent.read().await.clone()
@@ -71,6 +80,24 @@ impl AppState {
         *self.inner.chat_agent.write().await = agent;
         Ok(())
     }
+}
+
+fn build_persona_registry() -> PersonaRegistry {
+    let registry = PersonaRegistry::with_builtins();
+    let personas_dir =
+        std::env::var("PERSONAS_DIR").unwrap_or_else(|_| "personas".to_string());
+    let (loaded, errors) = registry.load_dir(&personas_dir);
+    if !loaded.is_empty() {
+        tracing::info!(
+            "Loaded {} persona(s) from {personas_dir}: {}",
+            loaded.len(),
+            loaded.join(", ")
+        );
+    }
+    for e in errors {
+        tracing::warn!("Persona load error: {e}");
+    }
+    registry
 }
 
 pub async fn build_chat_service(
@@ -117,7 +144,7 @@ pub async fn build_chat_service(
                 return Ok(None);
             }
             tracing::info!("LLM backend: local at {local_base_url} model={local_model}");
-            Ok(Some(Arc::new(LocalChatAgent::new(local_base_url, local_model))))
+            Ok(Some(Arc::new(LocalAgentChatService::new(store.clone(), local_base_url, local_model))))
         }
         "anthropic" => {
             match ChatService::from_env_with_model(store.clone(), anthropic_model) {
@@ -136,7 +163,7 @@ pub async fn build_chat_service(
             }
             if !local_base_url.is_empty() {
                 tracing::info!("LLM backend: local (auto fallback) at {local_base_url}");
-                return Ok(Some(Arc::new(LocalChatAgent::new(local_base_url, local_model))));
+                return Ok(Some(Arc::new(LocalAgentChatService::new(store.clone(), local_base_url, local_model))));
             }
             tracing::debug!("No LLM backend configured — chat disabled");
             Ok(None)

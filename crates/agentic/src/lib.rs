@@ -36,7 +36,7 @@ pub mod llm;
 pub mod mcp;
 pub mod persona;
 
-pub use agent::{ChatAgent, ChatMessage, ChatService, LocalChatAgent};
+pub use agent::{ChatAgent, ChatMessage, ChatService, LocalAgentChatService};
 pub use persona::{
     DisclosureContext, DisclosureLevel, EscalationConfig, FilePersona, Persona, PersonaAgent,
     PersonaRegistry, RequestedDepth, ToolLevel, ToolSpec,

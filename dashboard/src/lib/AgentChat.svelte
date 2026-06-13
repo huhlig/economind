@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, onMount } from 'svelte';
   import { chat } from '$lib/api.js';
   import type { ChatMessage, ChatPersona, ChatSession } from '$lib/api.js';
 
-  let open = $state(false);
   let draft = $state('');
   let history = $state<ChatMessage[]>([]);
   let sessions = $state<ChatSession[]>([]);
@@ -23,16 +22,10 @@
     'Compare active strategies over the next month.',
   ];
 
-  async function toggleChat() {
-    open = !open;
-    if (open && personas.length === 0 && !loadingPersonas) {
-      await loadPersonas();
-    }
-    if (open && sessions.length === 0 && !loadingSessions) {
-      await loadSessions();
-    }
-    await scrollToLatest();
-  }
+  onMount(async () => {
+    await loadPersonas();
+    await loadSessions();
+  });
 
   async function loadSessions() {
     loadingSessions = true;
@@ -136,30 +129,12 @@
   }
 </script>
 
-<button
-  type="button"
-  class="agent-chat-toggle"
-  class:agent-chat-toggle-open={open}
-  aria-label={open ? 'Close agent chat' : 'Open agent chat'}
-  title={open ? 'Close agent chat' : 'Open agent chat'}
-  onclick={toggleChat}
->
-  {open ? '<' : 'AI'}
-</button>
-
-{#if open}
-  <button class="agent-chat-scrim" aria-label="Close agent chat" onclick={toggleChat}></button>
-{/if}
-
-<aside class:open class="agent-chat-panel" aria-label="Agent chat">
+<div class="agent-sidebar">
   <div class="agent-chat-header">
     <div>
       <div class="agent-chat-title">Agent</div>
       <div class="agent-chat-subtitle">Low frequency trade analysis</div>
     </div>
-    <button type="button" class="agent-chat-icon-button" aria-label="Close agent chat" title="Close" onclick={toggleChat}>
-      x
-    </button>
   </div>
 
   <div class="agent-chat-controls">
@@ -238,58 +213,14 @@
       <button type="submit" disabled={loading || draft.trim().length === 0}>Send</button>
     </div>
   </form>
-</aside>
+</div>
 
 <style>
-  .agent-chat-toggle {
-    position: fixed;
-    left: 0;
-    top: 50%;
-    z-index: 70;
-    width: 42px;
-    height: 42px;
-    border: 1px solid var(--color-border);
-    border-left: 0;
-    border-radius: 0 8px 8px 0;
-    background: var(--color-accent-blue);
-    color: white;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0;
-    transform: translateY(-50%);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-    cursor: pointer;
-  }
-
-  .agent-chat-toggle-open {
-    left: min(400px, calc(100vw - 42px));
-  }
-
-  .agent-chat-scrim {
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-    border: 0;
-    background: rgba(5, 8, 15, 0.45);
-  }
-
-  .agent-chat-panel {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 60;
+  .agent-sidebar {
+    height: 100%;
     display: flex;
-    width: min(400px, calc(100vw - 42px));
-    max-width: 100vw;
     flex-direction: column;
-    background: var(--color-bg-sidebar);
-    border-right: 1px solid var(--color-border);
-    box-shadow: 22px 0 50px rgba(0, 0, 0, 0.35);
-    transform: translateX(-100%);
-    transition: transform 180ms ease;
-  }
-
-  .agent-chat-panel.open {
-    transform: translateX(0);
+    overflow: hidden;
   }
 
   .agent-chat-header {
@@ -311,20 +242,6 @@
     margin-top: 2px;
     color: var(--color-text-muted);
     font-size: 12px;
-  }
-
-  .agent-chat-icon-button {
-    display: grid;
-    width: 30px;
-    height: 30px;
-    place-items: center;
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
-    background: var(--color-bg-secondary);
-    color: var(--color-text-secondary);
-    font-size: 18px;
-    line-height: 1;
-    cursor: pointer;
   }
 
   .agent-chat-controls {

@@ -268,18 +268,9 @@ async fn get_session_handler(
 }
 
 async fn list_personas_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let Some(svc) = state.chat_agent().await else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({
-                "error": "Chat agent not configured — configure an LLM provider in Settings"
-            })),
-        )
-            .into_response();
-    };
-
-    let personas: Vec<serde_json::Value> = svc
-        .list_personas()
+    let personas: Vec<serde_json::Value> = state
+        .personas()
+        .list_visible()
         .into_iter()
         .map(|(id, name, description)| {
             serde_json::json!({
