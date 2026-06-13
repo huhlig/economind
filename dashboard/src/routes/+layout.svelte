@@ -19,7 +19,17 @@
     { href: '/settings',    label: 'Settings',         icon: '⚙' },
   ];
 
+  const SIDEBAR_MIN = 220;
+  const SIDEBAR_MAX = 600;
+  const STORAGE_KEY = 'agent-sidebar-width';
+
+  let sidebarWidth = $state(320);
+  let dragging = $state(false);
+
   onMount(() => {
+    const saved = parseInt(localStorage.getItem(STORAGE_KEY) ?? '', 10);
+    if (saved >= SIDEBAR_MIN && saved <= SIDEBAR_MAX) sidebarWidth = saved;
+
     if ($isAuthenticated) {
       const ws = getWsClient();
       ws.connect();
@@ -30,6 +40,27 @@
       };
     }
   });
+
+  function startDrag(e: MouseEvent) {
+    e.preventDefault();
+    dragging = true;
+
+    function onMove(e: MouseEvent) {
+      // Sidebar is on the right; width = distance from right edge of viewport
+      const newWidth = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - e.clientX));
+      sidebarWidth = newWidth;
+    }
+
+    function onUp() {
+      dragging = false;
+      localStorage.setItem(STORAGE_KEY, String(sidebarWidth));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
 </script>
 
 {#if !$isAuthenticated}
@@ -58,7 +89,8 @@
     </div>
   </div>
 {:else}
-  <div class="flex h-screen overflow-hidden">
+  <div class="flex h-screen overflow-hidden" style="cursor: {dragging ? 'col-resize' : 'auto'}; user-select: {dragging ? 'none' : 'auto'}">
+    <!-- Left nav -->
     <nav class="flex flex-col w-52 shrink-0 overflow-y-auto"
          style="background: var(--color-bg-sidebar); border-right: 1px solid var(--color-border);">
       <div class="px-4 py-5">
@@ -90,11 +122,38 @@
       </div>
     </nav>
 
+    <!-- Main content -->
     <main class="flex-1 min-w-0 overflow-y-auto" style="background: var(--color-bg-primary)">
       {@render children()}
     </main>
-    <aside class="w-80 shrink-0 flex flex-col overflow-hidden"
-           style="border-left: 1px solid var(--color-border); background: var(--color-bg-sidebar);">
+
+    <!-- Drag handle -->
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize agent sidebar"
+      onmousedown={startDrag}
+      style="
+        width: 5px;
+        flex-shrink: 0;
+        cursor: col-resize;
+        background: {dragging ? 'var(--color-accent-blue)' : 'var(--color-border)'};
+        transition: background 0.15s;
+      "
+    ></div>
+
+    <!-- Agent sidebar -->
+    <aside
+      style="
+        width: {sidebarWidth}px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--color-bg-sidebar);
+        border-left: 1px solid var(--color-border);
+      "
+    >
       <AgentChat />
     </aside>
   </div>

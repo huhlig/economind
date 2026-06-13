@@ -15,7 +15,7 @@ use axum::{
 };
 use chrono::NaiveDate;
 use economind_backtest::BacktestRunner;
-use economind_db::{BacktestStorage, StrategyStorage};
+use economind_db::{BacktestStorage, StrategySignalRow, StrategyStorage};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -148,6 +148,32 @@ async fn run_backtest(
         .run(state.store())
         .await
         .map_err(|e| ApiError::Internal(format!("backtest failed: {e}")))?;
+
+    // Persist final-day signals so the Signals Explorer can display them.
+    if !result.final_day_signals.is_empty() {
+        let signal_rows: Vec<StrategySignalRow> = result
+            .final_day_signals
+            .iter()
+            .map(|s| StrategySignalRow {
+                id: Uuid::new_v4(),
+                run_id: result.run_id,
+                config_id: req.config_id,
+                symbol: s.timing.candidate.symbol.as_str().to_string(),
+                direction: format!("{:?}", s.timing.direction).to_lowercase(),
+                identifier_score: rust_decimal::Decimal::try_from(s.timing.candidate.score)
+                    .unwrap_or_default(),
+                timing_score: rust_decimal::Decimal::try_from(s.timing.score)
+                    .unwrap_or_default(),
+                position_shares: Some(s.size.shares),
+                position_notional: Some(s.size.notional),
+                portfolio_fraction: Some(s.size.portfolio_fraction),
+                rationale: Some(s.timing.rationale.clone()),
+                analysis_brief: None,
+                emitted_at: chrono::Utc::now(),
+            })
+            .collect();
+        let _ = state.store().insert_strategy_signals(&signal_rows).await;
+    }
 
     let m = &result.metrics;
     Ok(Json(BacktestRunSummary {

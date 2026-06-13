@@ -17,8 +17,11 @@ use economind_strategy::{
 };
 use std::collections::HashMap;
 use strategy_atr_sizer::AtrSizer;
+use strategy_kelly_sizer::KellySizer;
 use strategy_mean_reversion::MeanReversionTimer;
 use strategy_momentum::MomentumIdentifier;
+use strategy_regime::RegimeIdentifier;
+use strategy_trend_follow::TrendFollowTimer;
 
 /// Build a `PipelineRunner` from a `StrategyConfig`.
 ///
@@ -38,11 +41,21 @@ pub fn build_pipeline(config: &StrategyConfig) -> anyhow::Result<PipelineRunner>
             ("identifier", "momentum") => {
                 builder = builder.identifier(MomentumIdentifier::new(&config.parameters));
             }
+            ("identifier", "regime") => {
+                builder = builder.identifier(RegimeIdentifier::new(&config.parameters));
+            }
             ("timer", "mean-reversion") => {
                 builder = builder.timer(MeanReversionTimer::new(&config.parameters));
             }
+            ("timer", "trend-follow") => {
+                builder = builder.timer(TrendFollowTimer::new(&config.parameters));
+            }
             ("sizer", "atr-sizer") => {
                 builder = builder.sizer(AtrSizer::new(&config.parameters));
+                has_sizer = true;
+            }
+            ("sizer", "kelly-sizer") => {
+                builder = builder.sizer(KellySizer::new(&config.parameters));
                 has_sizer = true;
             }
             (role, name) => {

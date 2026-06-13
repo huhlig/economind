@@ -27,7 +27,10 @@ economind-broker   = { workspace = true }
 # Strategy plugins (needed to wire pipelines for on-demand run endpoint)
 strategy-momentum       = { workspace = true }
 strategy-mean-reversion = { workspace = true }
+strategy-trend-follow   = { workspace = true }
+strategy-regime         = { workspace = true }
 strategy-atr-sizer      = { workspace = true }
+strategy-kelly-sizer    = { workspace = true }
 
 anyhow              = { workspace = true }
 reqwest             = { workspace = true }

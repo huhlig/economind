@@ -18,7 +18,7 @@ use economind_db::{
     MacroStorage, MetadataStorage,
 };
 use economind_strategy::{
-    config::StrategyConfig, context::StrategyContext, pipeline::PipelineRunner,
+    config::StrategyConfig, context::StrategyContext, pipeline::{PipelineRunner, TradeSignal},
     traits::TradeDirection,
 };
 use futures::StreamExt;
@@ -58,6 +58,8 @@ pub struct BacktestResult {
     pub run_id: Uuid,
     pub config: BacktestConfig,
     pub metrics: PerformanceMetrics,
+    /// Signals generated on the final simulated trading day.
+    pub final_day_signals: Vec<TradeSignal>,
 }
 
 // ── BacktestRunner ────────────────────────────────────────────────────────────
@@ -120,7 +122,7 @@ impl BacktestRunner {
 
         // Run the simulation; on error, mark as failed and return.
         match simulate(run_id, &config, pipeline, store).await {
-            Ok(metrics) => {
+            Ok((metrics, final_day_signals)) => {
                 let completed_at = chrono::Utc::now();
 
                 // Persist equity curve.
@@ -169,6 +171,7 @@ impl BacktestRunner {
                     run_id,
                     config,
                     metrics,
+                    final_day_signals,
                 })
             }
             Err(e) => {
@@ -210,7 +213,7 @@ async fn simulate(
     config: &BacktestConfig,
     pipeline: PipelineRunner,
     store: &DataStore,
-) -> Result<PerformanceMetrics, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(PerformanceMetrics, Vec<TradeSignal>), Box<dyn std::error::Error + Send + Sync>> {
     // Load the full instrument universe.
     let universe: Vec<Symbol> = store.list_tickers().await?.collect().await;
 
@@ -239,6 +242,7 @@ async fn simulate(
 
     // daily_values: date → (portfolio_value, cash)
     let mut daily_values: BTreeMap<NaiveDate, (Decimal, Decimal)> = BTreeMap::new();
+    let mut final_day_signals: Vec<TradeSignal> = Vec::new();
 
     for (idx, &date) in trading_dates.iter().enumerate() {
         // 1. Build StrategyContext from bars strictly before `date` (no lookahead).
@@ -268,6 +272,11 @@ async fn simulate(
 
         // 4. Run the strategy pipeline for new entry signals.
         let signals = pipeline.run(&ctx).await;
+
+        // Capture the final day's signals for export to the signals explorer.
+        if idx == trading_dates.len() - 1 {
+            final_day_signals = signals.clone();
+        }
 
         // 5. Enter new positions for qualifying signals.
         for signal in &signals {
@@ -337,7 +346,7 @@ async fn simulate(
         rf_daily,
     );
 
-    Ok(metrics)
+    Ok((metrics, final_day_signals))
 }
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
