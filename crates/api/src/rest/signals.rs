@@ -26,7 +26,7 @@ use crate::{
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/signals", get(list_signals))
-        .route("/signals/:id", get(get_signal))
+        .route("/signals/{id}", get(get_signal))
 }
 
 // ── Query params ──────────────────────────────────────────────────────────────

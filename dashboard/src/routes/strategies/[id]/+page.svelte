@@ -18,12 +18,17 @@
 
   onMount(async () => {
     const id = $page.params.id;
+    if (!id) {
+      error = 'Strategy id is missing.';
+      loading = false;
+      return;
+    }
     try {
       cfg = await strategy.get(id);
       editName = cfg.name;
       editDescription = cfg.description ?? '';
       editParams = JSON.stringify(cfg.parameters, null, 2);
-      editUniverse = cfg.universe.join(', ');
+      editUniverse = (cfg.universe ?? []).join(', ');
     } catch (e) {
       error = String(e);
     } finally {

@@ -87,7 +87,7 @@ impl Timer for TrendFollowTimer {
         };
 
         let bars = match ctx.bars.get(&candidate.symbol) {
-            Some(b) if b.len() >= self.slow_ema + self.adx_period + 1 => b,
+            Some(b) if b.len() > self.slow_ema + self.adx_period => b,
             Some(_) => return no_signal("Insufficient bars for trend-follow"),
             None => return no_signal("No bar data for symbol"),
         };

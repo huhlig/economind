@@ -363,8 +363,7 @@ impl WeightOptimizer {
                 } else {
                     // Shrink: move all vertices toward the best.
                     let best = simplex[order[0]].clone();
-                    for i in 1..simplex.len() {
-                        let idx = order[i];
+                    for &idx in order.iter().take(simplex.len()).skip(1) {
                         simplex[idx] = self.project_simplex(&self.add_scaled(
                             &best,
                             &self.sub(&simplex[idx], &best),

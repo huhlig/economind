@@ -156,7 +156,7 @@ impl MutationRoot {
             parameters,
             enabled: config_row.enabled,
             auto_execute: config_row.auto_execute,
-            execution_mode: ExecutionMode::from_str(&config_row.execution_mode),
+            execution_mode: ExecutionMode::parse_lossy(&config_row.execution_mode),
             version: config_row.version,
             created_at: config_row.created_at,
             updated_at: config_row.updated_at,

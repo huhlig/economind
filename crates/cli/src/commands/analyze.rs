@@ -53,12 +53,8 @@ pub struct AnalyzeInstrumentArgs {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub async fn execute(
-    args: AnalyzeArgs,
-    duckdb_path: &str,
-) -> anyhow::Result<()> {
-    let store = DataStore::open(duckdb_path)
-        .context("Failed to open DataStore")?;
+pub async fn execute(args: AnalyzeArgs, duckdb_path: &str) -> anyhow::Result<()> {
+    let store = DataStore::open(duckdb_path).context("Failed to open DataStore")?;
 
     let llm = economind_agentic::llm::LlmClientConfig::from_env();
 

@@ -3,6 +3,10 @@ name = "economind-api"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "economind_api"
+path = "src/lib.rs"
+
 [[bin]]
 name = "economind-serve"
 path = "src/main.rs"

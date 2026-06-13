@@ -26,7 +26,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/positions", get(list_open_positions))
         .route("/positions/history", get(position_history))
-        .route("/positions/:id", get(get_position))
+        .route("/positions/{id}", get(get_position))
 }
 
 // ── Response types ────────────────────────────────────────────────────────────

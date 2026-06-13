@@ -4,7 +4,7 @@
 
 //! WebSocket signal streaming (§5.D).
 //!
-//! Single endpoint: `GET /ws/signals`
+//! Single endpoint: `GET /api/v1/ws/signals`
 //!
 //! On connection the client must supply a valid API key via the
 //! `Authorization: Bearer <key>` header (checked in the upgrade handler).
@@ -14,6 +14,7 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket},
+        Query,
         State, WebSocketUpgrade,
     },
     http::{HeaderMap, StatusCode},
@@ -22,6 +23,7 @@ use axum::{
     Router,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
+use std::collections::HashMap;
 
 use crate::state::AppState;
 
@@ -33,13 +35,16 @@ pub fn router() -> Router<AppState> {
 async fn ws_handler(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> Response {
     // Validate API key before upgrading.
-    let provided = headers
+    let header_key = headers
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
+    let query_key = query.get("api_key").map(String::as_str);
+    let provided = header_key.or(query_key);
 
     match provided {
         Some(key) if key == state.api_key() => {

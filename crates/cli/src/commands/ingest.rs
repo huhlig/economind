@@ -92,12 +92,8 @@ pub struct FundamentalsArgs {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub async fn execute(
-    args: IngestArgs,
-    duckdb_path: &str,
-) -> anyhow::Result<()> {
-    let store = DataStore::open(duckdb_path)
-        .context("Failed to open DataStore")?;
+pub async fn execute(args: IngestArgs, duckdb_path: &str) -> anyhow::Result<()> {
+    let store = DataStore::open(duckdb_path).context("Failed to open DataStore")?;
 
     match args.command {
         IngestCommand::Bars(a) => run_bars(a, &store).await,

@@ -18,6 +18,7 @@ members = [
     "strategies/strategy-trend-follow",
     "strategies/strategy-atr-sizer",
     "strategies/strategy-kelly-sizer",
+    "src-tauri",
 ]
 
 [workspace.package]
@@ -67,11 +68,12 @@ schemars = { version = "1.1" }
 
 
 # Observability
+metrics = { version = "0.24" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Database
-duckdb = { version = "1", features = ["default"] }
+duckdb = { version = "1", features = ["default", "bundled", ] }
 rust_decimal = { version = "1", features = ["default"] }
 
 # Serialization
@@ -96,3 +98,6 @@ dotenvy = { version = "0.15" }
 
 # Misc
 nonzero_ext = "0.3"
+
+[patch.crates-io]
+libduckdb-sys = { path = "vendor/libduckdb-sys" }

@@ -202,7 +202,7 @@ pub fn multi_timeframe_confluence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDateTime;
+    use chrono::{DateTime, NaiveDateTime};
     use economind_core::model::{CandleEntry, PatternDetection, PatternType};
     use rust_decimal::Decimal;
     use std::str::FromStr;
@@ -212,7 +212,9 @@ mod tests {
     }
 
     fn ts(secs: i64) -> NaiveDateTime {
-        NaiveDateTime::from_timestamp_opt(86400 * secs, 0).unwrap()
+        DateTime::from_timestamp(86400 * secs, 0)
+            .unwrap()
+            .naive_utc()
     }
 
     fn candle(secs: i64, high: &str, low: &str, close: &str) -> CandleEntry {
@@ -272,8 +274,8 @@ mod tests {
     fn atr_zero_before_window_fills() {
         let data = rising_series(30, 50.0);
         let result = atr(&data, 14);
-        for i in 0..14 {
-            assert_eq!(result[i], 0.0, "atr[{i}] should be 0 before window fills");
+        for (i, value) in result.iter().enumerate().take(14) {
+            assert_eq!(*value, 0.0, "atr[{i}] should be 0 before window fills");
         }
     }
 
@@ -291,8 +293,8 @@ mod tests {
     fn atr_small_for_flat_series() {
         let data = flat_series(30, 100.0);
         let result = atr(&data, 14);
-        for i in 14..30 {
-            assert!(result[i] < 0.1, "atr[{i}]={} for flat series", result[i]);
+        for (i, value) in result.iter().enumerate().take(30).skip(14) {
+            assert!(*value < 0.1, "atr[{i}]={value} for flat series");
         }
     }
 
@@ -324,12 +326,8 @@ mod tests {
         // All bars have volume 10_000 → SMA should be 10_000 after window fills
         let data = rising_series(30, 50.0);
         let result = volume_sma(&data, 10);
-        for i in 10..30 {
-            assert!(
-                (result[i] - 10_000.0).abs() < 1.0,
-                "volume_sma[{i}]={}",
-                result[i]
-            );
+        for (i, value) in result.iter().enumerate().take(30).skip(10) {
+            assert!((*value - 10_000.0).abs() < 1.0, "volume_sma[{i}]={}", value);
         }
     }
 
@@ -337,9 +335,9 @@ mod tests {
     fn volume_sma_zero_before_window_fills() {
         let data = rising_series(30, 50.0);
         let result = volume_sma(&data, 10);
-        for i in 0..10 {
+        for (i, value) in result.iter().enumerate().take(10) {
             assert_eq!(
-                result[i], 0.0,
+                *value, 0.0,
                 "volume_sma[{i}] should be 0 before window fills"
             );
         }
@@ -432,7 +430,7 @@ mod tests {
     // ── multi_timeframe_confluence ────────────────────────────────────────────
 
     fn make_pattern(pattern: PatternType) -> PatternDetection {
-        let t = NaiveDateTime::from_timestamp_opt(0, 0).unwrap();
+        let t = DateTime::from_timestamp(0, 0).unwrap().naive_utc();
         PatternDetection {
             pattern,
             start_time: t,

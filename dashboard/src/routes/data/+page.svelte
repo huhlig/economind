@@ -9,6 +9,9 @@
   let loading = $state(true);
   let barsLoading = $state(false);
   let error = $state<string | null>(null);
+  let ingesting = $state(false);
+  let datafeeding = $state<string | null>(null);
+  let ingestSummary = $state<string | null>(null);
 
   let selectedSymbol = $state('');
   let fromDate = $state('2023-01-01');
@@ -40,6 +43,42 @@
       error = String(e);
     } finally {
       barsLoading = false;
+    }
+  }
+
+  async function ingestBars() {
+    ingesting = true;
+    error = null;
+    ingestSummary = null;
+    try {
+      const result = await data.ingestBars({ since: fromDate, concurrency: 4 });
+      ingestSummary = result.summary;
+      await loadBars();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      ingesting = false;
+    }
+  }
+
+  async function fetchDatafeed(action: 'rreichel' | 'tiingo-metadata' | 'tiingo-prices') {
+    if (action !== 'rreichel' && !selectedSymbol) return;
+    datafeeding = action;
+    error = null;
+    ingestSummary = null;
+    try {
+      const result =
+        action === 'rreichel'
+          ? await data.fetchRReichel()
+          : action === 'tiingo-metadata'
+            ? await data.fetchTiingoMetadata(selectedSymbol)
+            : await data.fetchTiingoPrices(selectedSymbol);
+      ingestSummary = result.message;
+      if (action !== 'tiingo-metadata') await loadBars();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      datafeeding = null;
     }
   }
 
@@ -115,11 +154,46 @@
       >
         {barsLoading ? 'Loading…' : 'Load Bars'}
       </button>
+      <button
+        onclick={ingestBars}
+        disabled={ingesting}
+        class="px-4 py-1.5 rounded-lg text-sm font-medium"
+        style="background: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-primary); opacity: {ingesting ? 0.6 : 1};"
+      >
+        {ingesting ? 'Ingesting…' : 'Ingest Bars'}
+      </button>
+      <button
+        onclick={() => fetchDatafeed('rreichel')}
+        disabled={datafeeding != null}
+        class="px-4 py-1.5 rounded-lg text-sm font-medium"
+        style="background: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-primary); opacity: {datafeeding ? 0.6 : 1};"
+      >
+        {datafeeding === 'rreichel' ? 'Fetching…' : 'Fetch RReichel'}
+      </button>
+      <button
+        onclick={() => fetchDatafeed('tiingo-metadata')}
+        disabled={datafeeding != null || !selectedSymbol}
+        class="px-4 py-1.5 rounded-lg text-sm font-medium"
+        style="background: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-primary); opacity: {datafeeding ? 0.6 : 1};"
+      >
+        {datafeeding === 'tiingo-metadata' ? 'Fetching…' : 'Tiingo Metadata'}
+      </button>
+      <button
+        onclick={() => fetchDatafeed('tiingo-prices')}
+        disabled={datafeeding != null || !selectedSymbol}
+        class="px-4 py-1.5 rounded-lg text-sm font-medium"
+        style="background: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-primary); opacity: {datafeeding ? 0.6 : 1};"
+      >
+        {datafeeding === 'tiingo-prices' ? 'Fetching…' : 'Tiingo Prices'}
+      </button>
     {/if}
   </div>
 
   {#if error}
     <div class="text-sm mb-4" style="color: var(--color-accent-red)">{error}</div>
+  {/if}
+  {#if ingestSummary}
+    <div class="text-xs mb-4" style="color: var(--color-text-muted)">{ingestSummary}</div>
   {/if}
 
   {#if bars.length > 0}

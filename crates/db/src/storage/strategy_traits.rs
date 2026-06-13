@@ -260,3 +260,37 @@ pub trait BacktestStorage: Send + Sync {
     /// Fetch the full equity curve for a backtest run (sorted by date asc).
     async fn get_equity_curve(&self, run_id: Uuid) -> StorageResult<Vec<EquityCurvePoint>>;
 }
+
+// ── ChatStorage ──────────────────────────────────────────────────────────────
+
+/// Persisted agent chat session.
+#[derive(Debug, Clone)]
+pub struct ChatSessionRow {
+    pub id: Uuid,
+    pub title: String,
+    pub persona_id: Option<String>,
+    pub depth: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Persisted agent chat message.
+#[derive(Debug, Clone)]
+pub struct ChatMessageRow {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub ordinal: i32,
+    pub role: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Trait for persisting and reading chat sessions and their messages.
+#[allow(async_fn_in_trait)]
+pub trait ChatStorage: Send + Sync {
+    async fn upsert_chat_session(&self, row: &ChatSessionRow) -> StorageResult<()>;
+    async fn list_chat_sessions(&self, limit: Option<u32>) -> StorageResult<Vec<ChatSessionRow>>;
+    async fn get_chat_session(&self, id: Uuid) -> StorageResult<Option<ChatSessionRow>>;
+    async fn insert_chat_messages(&self, rows: &[ChatMessageRow]) -> StorageResult<()>;
+    async fn list_chat_messages(&self, session_id: Uuid) -> StorageResult<Vec<ChatMessageRow>>;
+}

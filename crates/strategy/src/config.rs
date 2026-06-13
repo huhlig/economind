@@ -11,6 +11,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 use uuid::Uuid;
 
 // ── Composition mode ──────────────────────────────────────────────────────────
@@ -53,16 +54,25 @@ impl std::fmt::Display for ExecutionMode {
 }
 
 impl ExecutionMode {
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "paper" => ExecutionMode::Paper,
-            "live" => ExecutionMode::Live,
-            _ => ExecutionMode::SignalOnly,
-        }
+    pub fn parse_lossy(s: &str) -> Self {
+        s.parse().unwrap_or_default()
     }
 
     pub fn executes_orders(self) -> bool {
         matches!(self, ExecutionMode::Paper | ExecutionMode::Live)
+    }
+}
+
+impl FromStr for ExecutionMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "signal_only" => Ok(ExecutionMode::SignalOnly),
+            "paper" => Ok(ExecutionMode::Paper),
+            "live" => Ok(ExecutionMode::Live),
+            _ => Err(()),
+        }
     }
 }
 

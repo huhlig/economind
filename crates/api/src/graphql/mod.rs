@@ -2,8 +2,8 @@
 // Copyright (C) Hans W. Uhlig - All Rights Reserved
 //
 
-//! GraphQL layer — async-graphql schema, mounted at `/graphql`.
-//! GraphiQL playground available at `/graphiql` (all environments for now).
+//! GraphQL layer — async-graphql schema, mounted at `/api/v1/graphql`.
+//! GraphiQL playground available at `/api/v1/graphiql` (all environments for now).
 //!
 //! Schema root:
 //! - `Query`    — read-only access to all platform data (§5.C.2)
@@ -36,7 +36,7 @@ pub fn build_schema(state: AppState) -> ApiSchema {
         .finish()
 }
 
-/// Mount `/graphql` (POST) and `/graphiql` (GET) routes.
+/// Mount `/graphql` (POST) and `/graphiql` (GET) routes under the API prefix.
 /// The schema already carries `AppState` in its data layer (injected in `build_schema`).
 pub fn router(schema: ApiSchema) -> Router<AppState> {
     // We need the schema accessible inside the handler.  Store it via an
@@ -56,5 +56,5 @@ async fn graphql_handler(
 }
 
 async fn graphiql_handler() -> impl IntoResponse {
-    Html(async_graphql::http::graphiql_source("/graphql", None))
+    Html(async_graphql::http::graphiql_source("/api/v1/graphql", None))
 }

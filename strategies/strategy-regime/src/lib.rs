@@ -341,9 +341,9 @@ impl GaussianHmm {
     /// Log probability of observation `o` under state `k` (diagonal Gaussian).
     fn log_emit(&self, k: usize, o: &Obs) -> f64 {
         let mut lp = 0.0_f64;
-        for d in 0..D {
+        for (d, &value) in o.iter().enumerate().take(D) {
             let v = self.vars[k][d].max(1e-10);
-            let diff = o[d] - self.means[k][d];
+            let diff = value - self.means[k][d];
             lp -= 0.5 * (diff * diff / v + v.ln() + (2.0 * std::f64::consts::PI).ln());
         }
         lp
@@ -356,18 +356,24 @@ impl GaussianHmm {
         let k = self.n_states;
         let mut alpha = vec![vec![LOG_TINY; k]; t];
 
-        for j in 0..k {
-            alpha[0][j] = self.log_pi[j] + self.log_emit(j, &obs[0]);
+        for (j, alpha_j) in alpha[0].iter_mut().enumerate().take(k) {
+            *alpha_j = self.log_pi[j] + self.log_emit(j, &obs[0]);
         }
 
         for t_i in 1..t {
-            for j in 0..k {
+            let (before, current_and_after) = alpha.split_at_mut(t_i);
+            let previous = &before[t_i - 1];
+            let current = &mut current_and_after[0];
+            for (j, alpha_tj) in current.iter_mut().enumerate().take(k) {
                 let log_sum = log_sum_exp_vec(
-                    (0..k)
-                        .map(|i| alpha[t_i - 1][i] + self.log_a[i][j])
+                    previous
+                        .iter()
+                        .enumerate()
+                        .take(k)
+                        .map(|(i, &alpha_prev)| alpha_prev + self.log_a[i][j])
                         .collect(),
                 );
-                alpha[t_i][j] = log_sum + self.log_emit(j, &obs[t_i]);
+                *alpha_tj = log_sum + self.log_emit(j, &obs[t_i]);
             }
         }
 
@@ -421,8 +427,8 @@ impl GaussianHmm {
             for t_i in 0..t {
                 let log_denom =
                     log_sum_exp_vec((0..k).map(|j| alpha[t_i][j] + beta[t_i][j]).collect());
-                for j in 0..k {
-                    log_gamma[t_i][j] = alpha[t_i][j] + beta[t_i][j] - log_denom;
+                for (j, gamma) in log_gamma[t_i].iter_mut().enumerate().take(k) {
+                    *gamma = alpha[t_i][j] + beta[t_i][j] - log_denom;
                 }
             }
 
@@ -432,21 +438,21 @@ impl GaussianHmm {
             for t_i in 0..t.saturating_sub(1) {
                 let log_denom = {
                     let mut vals = Vec::with_capacity(k * k);
-                    for i in 0..k {
-                        for j in 0..k {
+                    for (i, &alpha_i) in alpha[t_i].iter().enumerate().take(k) {
+                        for (j, &beta_next_j) in beta[t_i + 1].iter().enumerate().take(k) {
                             vals.push(
-                                alpha[t_i][i]
+                                alpha_i
                                     + self.log_a[i][j]
                                     + self.log_emit(j, &obs[t_i + 1])
-                                    + beta[t_i + 1][j],
+                                    + beta_next_j,
                             );
                         }
                     }
                     log_sum_exp_vec(vals)
                 };
-                for i in 0..k {
-                    for j in 0..k {
-                        log_xi[t_i][i][j] = alpha[t_i][i]
+                for (i, row) in log_xi[t_i].iter_mut().enumerate().take(k) {
+                    for (j, value) in row.iter_mut().enumerate().take(k) {
+                        *value = alpha[t_i][i]
                             + self.log_a[i][j]
                             + self.log_emit(j, &obs[t_i + 1])
                             + beta[t_i + 1][j]
@@ -458,51 +464,62 @@ impl GaussianHmm {
             // ── M-step ───────────────────────────────────────────────────────
 
             // Update π.
-            for j in 0..k {
-                self.log_pi[j] = log_gamma[0][j];
+            for (j, log_pi) in self.log_pi.iter_mut().enumerate().take(k) {
+                *log_pi = log_gamma[0][j];
             }
             // Normalise π.
             let log_sum_pi = log_sum_exp_vec(self.log_pi.clone());
-            for j in 0..k {
-                self.log_pi[j] -= log_sum_pi;
+            for log_pi in self.log_pi.iter_mut().take(k) {
+                *log_pi -= log_sum_pi;
             }
 
             // Update A.
-            for i in 0..k {
+            for (i, log_a_row) in self.log_a.iter_mut().enumerate().take(k) {
                 let log_denom_i = log_sum_exp_vec(
                     (0..t.saturating_sub(1))
                         .map(|t_i| log_gamma[t_i][i])
                         .collect(),
                 );
-                for j in 0..k {
+                for (j, log_a_ij) in log_a_row.iter_mut().enumerate().take(k) {
                     let log_numer = log_sum_exp_vec(
                         (0..t.saturating_sub(1))
                             .map(|t_i| log_xi[t_i][i][j])
                             .collect(),
                     );
-                    self.log_a[i][j] = log_numer - log_denom_i;
+                    *log_a_ij = log_numer - log_denom_i;
                 }
             }
 
             // Update emission means and variances.
-            for j in 0..k {
+            for (j, (means_j, vars_j)) in self
+                .means
+                .iter_mut()
+                .zip(self.vars.iter_mut())
+                .enumerate()
+                .take(k)
+            {
                 let log_denom_j = log_sum_exp_vec((0..t).map(|t_i| log_gamma[t_i][j]).collect());
                 let gamma_sum = log_denom_j.exp().max(1e-30);
 
-                for d in 0..D {
+                for (d, (mean_d, var_d)) in means_j
+                    .iter_mut()
+                    .zip(vars_j.iter_mut())
+                    .enumerate()
+                    .take(D)
+                {
                     // Mean update.
                     let new_mean: f64 = (0..t)
                         .map(|t_i| log_gamma[t_i][j].exp() * obs[t_i][d])
                         .sum::<f64>()
                         / gamma_sum;
-                    self.means[j][d] = new_mean;
+                    *mean_d = new_mean;
 
                     // Variance update.
                     let new_var: f64 = (0..t)
                         .map(|t_i| log_gamma[t_i][j].exp() * (obs[t_i][d] - new_mean).powi(2))
                         .sum::<f64>()
                         / gamma_sum;
-                    self.vars[j][d] = new_var.max(1e-6);
+                    *var_d = new_var.max(1e-6);
                 }
             }
         }
@@ -518,8 +535,8 @@ impl GaussianHmm {
         let mut psi = vec![vec![0usize; k]; t];
 
         // Initialise.
-        for j in 0..k {
-            delta[0][j] = self.log_pi[j] + self.log_emit(j, &obs[0]);
+        for (j, delta_j) in delta[0].iter_mut().enumerate().take(k) {
+            *delta_j = self.log_pi[j] + self.log_emit(j, &obs[0]);
         }
 
         // Recursion.

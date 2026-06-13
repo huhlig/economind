@@ -47,7 +47,7 @@ export class EconomindWS {
 
   private _open(): void {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/signals?api_key=${encodeURIComponent(this.apiKey)}`;
+    const url = `${proto}://${location.host}/api/v1/ws/signals?api_key=${encodeURIComponent(this.apiKey)}`;
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {

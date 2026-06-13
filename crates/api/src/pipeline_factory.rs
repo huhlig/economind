@@ -10,10 +10,12 @@
 //! from plugin implementation details.
 
 use anyhow::anyhow;
+use economind_db::StrategyConfigRow;
 use economind_strategy::{
-    config::StrategyConfig,
+    config::{CompositionMode, ExecutionMode, PluginSpec, StrategyConfig},
     pipeline::{PipelineRunner, PipelineRunnerBuilder},
 };
+use std::collections::HashMap;
 use strategy_atr_sizer::AtrSizer;
 use strategy_mean_reversion::MeanReversionTimer;
 use strategy_momentum::MomentumIdentifier;
@@ -54,4 +56,33 @@ pub fn build_pipeline(config: &StrategyConfig) -> anyhow::Result<PipelineRunner>
     }
 
     Ok(builder.build())
+}
+
+/// Reconstruct a domain `StrategyConfig` from the persisted database row.
+pub fn strategy_config_from_row(row: StrategyConfigRow) -> anyhow::Result<StrategyConfig> {
+    let plugins: Vec<PluginSpec> = serde_json::from_str(&row.plugins_json)
+        .map_err(|e| anyhow!("invalid plugins JSON for strategy {}: {e}", row.id))?;
+    let parameters: HashMap<String, String> = serde_json::from_str(&row.parameters_json)
+        .map_err(|e| anyhow!("invalid parameters JSON for strategy {}: {e}", row.id))?;
+    let composition = match row.composition.as_str() {
+        "pipeline" => CompositionMode::Pipeline,
+        "voting" => CompositionMode::Voting,
+        "ensemble" => CompositionMode::Ensemble,
+        other => return Err(anyhow!("unknown composition for strategy {}: {other}", row.id)),
+    };
+
+    Ok(StrategyConfig {
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        composition,
+        plugins,
+        parameters,
+        enabled: row.enabled,
+        auto_execute: row.auto_execute,
+        execution_mode: ExecutionMode::parse_lossy(&row.execution_mode),
+        version: row.version,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
 }

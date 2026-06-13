@@ -9,6 +9,7 @@ use economind_agentic::ChatService;
 use economind_db::DataStore;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tokio::sync::RwLock;
 
 const EVENT_BUS_CAPACITY: usize = 256;
 
@@ -23,7 +24,7 @@ struct Inner {
     pub api_key: String,
     pub event_bus: EventBus,
     /// Present when `ANTHROPIC_API_KEY` is set at startup.
-    pub chat_service: Option<ChatService>,
+    pub chat_service: RwLock<Option<ChatService>>,
 }
 
 impl AppState {
@@ -31,7 +32,7 @@ impl AppState {
         let store = DataStore::open(duckdb_path)
             .map_err(|e| anyhow::anyhow!("DataStore open failed: {e}"))?;
 
-        let chat_service = ChatService::from_env(store.clone());
+        let chat_service = build_chat_service(&store).await?;
 
         let (tx, _) = broadcast::channel(EVENT_BUS_CAPACITY);
         let event_bus = EventBus::new(tx);
@@ -41,7 +42,7 @@ impl AppState {
                 store,
                 api_key,
                 event_bus,
-                chat_service,
+                chat_service: RwLock::new(chat_service),
             }),
         })
     }
@@ -59,7 +60,25 @@ impl AppState {
     }
 
     /// Returns the chat agent, or `None` if `ANTHROPIC_API_KEY` was not set.
-    pub fn chat_service(&self) -> Option<&ChatService> {
-        self.inner.chat_service.as_ref()
+    pub async fn chat_service(&self) -> Option<ChatService> {
+        self.inner.chat_service.read().await.clone()
     }
+
+    /// Rebuild the chat agent from persisted LLM settings and environment secrets.
+    pub async fn reload_chat_service(&self) -> anyhow::Result<()> {
+        let chat_service = build_chat_service(&self.inner.store).await?;
+        *self.inner.chat_service.write().await = chat_service;
+        Ok(())
+    }
+}
+
+async fn build_chat_service(store: &DataStore) -> anyhow::Result<Option<ChatService>> {
+    let model = store
+        .get_setting("llm.anthropic_model")
+        .await
+        .map_err(|e| anyhow::anyhow!("LLM settings load failed: {e}"))?
+        .or_else(|| std::env::var("AGENT_MODEL").ok())
+        .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
+
+    Ok(ChatService::from_env_with_model(store.clone(), model))
 }

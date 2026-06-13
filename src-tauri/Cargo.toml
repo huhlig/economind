@@ -1,0 +1,24 @@
+[package]
+name = "economind-tauri"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "economind"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+economind-api    = { workspace = true }
+economind-cli    = { path = "../crates/cli" }
+economind-config = { workspace = true }
+
+tauri               = { version = "2", features = ["tray-icon"] }
+tokio               = { workspace = true }
+anyhow              = { workspace = true }
+tracing             = { workspace = true }
+tracing-subscriber  = { workspace = true }
+dotenvy             = { workspace = true }
+open                = "5"

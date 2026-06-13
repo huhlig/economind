@@ -10,14 +10,18 @@
 
 use axum::{
     extract::{Query, State},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use chrono::NaiveDate;
 use economind_core::model::Symbol;
 use economind_db::{CandleStorage, MacroStorage, MetadataStorage};
+use economind_ingest::{
+    DataFeedManager, DataFeedManagerConfig, EdgarConnector, FredConnector, SimFinConnector,
+    YahooFinanceConnector,
+};
 use futures::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{ApiError, ApiResult},
@@ -29,6 +33,9 @@ pub fn router() -> Router<AppState> {
         .route("/data/bars", get(get_bars))
         .route("/data/fundamentals", get(get_fundamentals))
         .route("/data/macro", get(get_macro))
+        .route("/data/ingest/bars", post(ingest_bars))
+        .route("/data/ingest/macro", post(ingest_macro))
+        .route("/data/ingest/fundamentals", post(ingest_fundamentals))
 }
 
 // ── Query params ──────────────────────────────────────────────────────────────
@@ -54,6 +61,37 @@ pub struct MacroQuery {
     pub series: Option<String>,
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IngestBarsRequest {
+    pub since: Option<NaiveDate>,
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IngestMacroRequest {
+    pub since: Option<NaiveDate>,
+    pub series: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct IngestFundamentalsRequest {
+    #[serde(default)]
+    pub edgar_only: bool,
+    #[serde(default)]
+    pub simfin_only: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IngestResponse {
+    pub status: String,
+    pub summary: String,
+}
+
+fn default_concurrency() -> usize {
+    4
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -175,4 +213,83 @@ async fn get_macro(
         "from": from,
         "to": to,
     })))
+}
+
+/// `POST /api/v1/data/ingest/bars`
+async fn ingest_bars(
+    State(state): State<AppState>,
+    Json(req): Json<IngestBarsRequest>,
+) -> ApiResult<Json<IngestResponse>> {
+    let yahoo = YahooFinanceConnector::new().with_concurrency(req.concurrency);
+    let manager = DataFeedManager::new(DataFeedManagerConfig::default()).with_yahoo(yahoo);
+    let result = manager.run_bars(state.store(), req.since).await;
+
+    if result.symbols_err > 0 && result.symbols_ok == 0 {
+        return Err(ApiError::Internal(format!("{result}")));
+    }
+
+    Ok(Json(IngestResponse {
+        status: "completed".to_string(),
+        summary: result.to_string(),
+    }))
+}
+
+/// `POST /api/v1/data/ingest/macro`
+async fn ingest_macro(
+    State(state): State<AppState>,
+    Json(req): Json<IngestMacroRequest>,
+) -> ApiResult<Json<IngestResponse>> {
+    let fred = FredConnector::from_env()
+        .map_err(|e| ApiError::BadRequest(format!("FRED connector unavailable: {e}")))?;
+    let manager = DataFeedManager::new(DataFeedManagerConfig {
+        fred_series: req.series,
+        ..Default::default()
+    })
+    .with_fred(fred);
+    let result = manager.run_macro(state.store(), req.since).await;
+
+    if result.symbols_err > 0 && result.symbols_ok == 0 {
+        return Err(ApiError::Internal(format!("{result}")));
+    }
+
+    Ok(Json(IngestResponse {
+        status: "completed".to_string(),
+        summary: result.to_string(),
+    }))
+}
+
+/// `POST /api/v1/data/ingest/fundamentals`
+async fn ingest_fundamentals(
+    State(state): State<AppState>,
+    Json(req): Json<IngestFundamentalsRequest>,
+) -> ApiResult<Json<IngestResponse>> {
+    let mut manager = DataFeedManager::new(DataFeedManagerConfig::default());
+
+    if !req.simfin_only {
+        manager = manager.with_edgar(EdgarConnector::new());
+    }
+
+    if !req.edgar_only {
+        match SimFinConnector::from_env() {
+            Ok(sf) => {
+                manager = manager.with_simfin(sf);
+            }
+            Err(e) if req.simfin_only => {
+                return Err(ApiError::BadRequest(format!(
+                    "SimFin connector unavailable: {e}"
+                )));
+            }
+            Err(_) => {}
+        }
+    }
+
+    let result = manager.run_fundamentals(state.store()).await;
+    if result.symbols_err > 0 && result.symbols_ok == 0 {
+        return Err(ApiError::Internal(format!("{result}")));
+    }
+
+    Ok(Json(IngestResponse {
+        status: "completed".to_string(),
+        summary: result.to_string(),
+    }))
 }

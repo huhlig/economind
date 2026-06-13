@@ -6,15 +6,29 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     // manifest_dir = …/crates/api  →  parent = …/crates  →  parent = …/economind
     let dashboard_dir = Path::new(&manifest_dir)
-        .parent().unwrap()  // crates/
-        .parent().unwrap()  // economind/
+        .parent()
+        .unwrap() // crates/
+        .parent()
+        .unwrap() // economind/
         .join("dashboard");
 
     // Re-run build script when dashboard sources change.
-    println!("cargo:rerun-if-changed={}", dashboard_dir.join("src").display());
-    println!("cargo:rerun-if-changed={}", dashboard_dir.join("package.json").display());
-    println!("cargo:rerun-if-changed={}", dashboard_dir.join("vite.config.ts").display());
-    println!("cargo:rerun-if-changed={}", dashboard_dir.join("svelte.config.js").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        dashboard_dir.join("src").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        dashboard_dir.join("package.json").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        dashboard_dir.join("vite.config.ts").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        dashboard_dir.join("svelte.config.js").display()
+    );
 
     // Skip when docs.rs is building or the caller explicitly opts out.
     if env::var("DOCS_RS").is_ok() || env::var("SKIP_DASHBOARD").is_ok() {

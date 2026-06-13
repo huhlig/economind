@@ -14,9 +14,10 @@
 //! All async methods wrap DuckDB's synchronous API via `tokio::task::spawn_blocking`.
 
 use crate::storage::{
-    BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, EquityCurvePoint,
-    MacroSeriesPoint, MacroStorage, MetadataStorage, OpenPosition, PortfolioState, PortfolioStorage,
-    StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage, TickStorage, TickerQuery,
+    BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, ChatMessageRow,
+    ChatSessionRow, ChatStorage, EquityCurvePoint, MacroSeriesPoint, MacroStorage,
+    MetadataStorage, OpenPosition, PortfolioState, PortfolioStorage, StrategyConfigRow,
+    StrategyRunRow, StrategySignalRow, StrategyStorage, TickStorage, TickerQuery,
 };
 use crate::StorageError;
 use crate::StorageResult;
@@ -93,6 +94,44 @@ impl DuckDatabase {
         self.preloaded.load(Ordering::Relaxed)
     }
 
+    /// Read a runtime setting from DuckDB.
+    pub async fn get_setting(&self, key: &str) -> StorageResult<Option<String>> {
+        let conn = self.conn.clone();
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<Option<String>> {
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
+            let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key=?")?;
+            Ok(stmt
+                .query_map([&key], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .next())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    /// Upsert a runtime setting in DuckDB.
+    pub async fn set_setting(&self, key: &str, value: &str) -> StorageResult<()> {
+        let conn = self.conn.clone();
+        let key = key.to_string();
+        let value = value.to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<()> {
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
+            conn.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) \
+                 ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                params![key, value, Utc::now().to_rfc3339()],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
     /// Materialise hot tables into an attached `:memory:` schema.
     ///
     /// Call once before each strategy run.  Subsequent calls refresh the cache.
@@ -102,7 +141,9 @@ impl DuckDatabase {
         let conn = self.conn.clone();
         let preloaded = self.preloaded.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             // ATTACH ':memory:' once; silently ignore if already attached.
             let _ = conn.execute_batch("ATTACH ':memory:' AS hot;");
             conn.execute_batch(&format!(
@@ -136,16 +177,32 @@ impl DuckDatabase {
     // ── table name routing (hot cache vs. on-disk) ────────────────────────────
 
     fn t_instruments(&self) -> &'static str {
-        if self.preloaded.load(Ordering::Relaxed) { "hot.instruments" } else { "instruments" }
+        if self.preloaded.load(Ordering::Relaxed) {
+            "hot.instruments"
+        } else {
+            "instruments"
+        }
     }
     fn t_bars(&self) -> &'static str {
-        if self.preloaded.load(Ordering::Relaxed) { "hot.bars" } else { "bars" }
+        if self.preloaded.load(Ordering::Relaxed) {
+            "hot.bars"
+        } else {
+            "bars"
+        }
     }
     fn t_macro(&self) -> &'static str {
-        if self.preloaded.load(Ordering::Relaxed) { "hot.macro_series" } else { "macro_series" }
+        if self.preloaded.load(Ordering::Relaxed) {
+            "hot.macro_series"
+        } else {
+            "macro_series"
+        }
     }
     fn t_strategy_configs(&self) -> &'static str {
-        if self.preloaded.load(Ordering::Relaxed) { "hot.strategy_configs" } else { "strategy_configs" }
+        if self.preloaded.load(Ordering::Relaxed) {
+            "hot.strategy_configs"
+        } else {
+            "strategy_configs"
+        }
     }
 }
 
@@ -946,7 +1003,9 @@ impl MacroStorage for DuckDatabase {
         let conn = self.conn.clone();
         let points: Vec<MacroSeriesPoint> = points.to_vec();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "INSERT INTO macro_series (series_id, date, value, fetched_at) \
                  VALUES (?, ?, ?, ?) \
@@ -957,7 +1016,7 @@ impl MacroStorage for DuckDatabase {
                 stmt.execute(params![
                     p.series_id,
                     p.date.to_string(),
-                    p.value.map(|v| d2f(v)),
+                    p.value.map(d2f),
                     p.fetched_at.to_rfc3339(),
                 ])?;
             }
@@ -975,7 +1034,9 @@ impl MacroStorage for DuckDatabase {
         let table = self.t_macro();
         let ids: Vec<String> = series_ids.iter().map(|s| s.to_string()).collect();
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<MacroSeriesPoint>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut results = Vec::new();
             for id in &ids {
                 let mut stmt = conn.prepare(&format!(
@@ -1007,7 +1068,9 @@ impl MacroStorage for DuckDatabase {
         let start = date_range.start.to_string();
         let end = date_range.end.to_string();
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<MacroSeriesPoint>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(&format!(
                 "SELECT series_id, date, value, fetched_at FROM {table} \
                  WHERE series_id=? AND date>=? AND date<? ORDER BY date ASC"
@@ -1028,7 +1091,9 @@ impl PortfolioStorage for DuckDatabase {
     async fn load_portfolio_state(&self) -> StorageResult<PortfolioState> {
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<PortfolioState> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
 
             // Load open positions.
             let mut stmt = conn.prepare(
@@ -1045,13 +1110,15 @@ impl PortfolioStorage for DuckDatabase {
                     Ok((id_str, sym, shares, entry_price, entry_str))
                 })?
                 .filter_map(|r| r.ok())
-                .map(|(id_str, sym, shares, entry_price, entry_str)| OpenPosition {
-                    id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::nil()),
-                    symbol: Symbol::new(&sym),
-                    shares: f2d(shares),
-                    entry_price: f2d(entry_price),
-                    entry_at: parse_datetime_utc(&entry_str),
-                })
+                .map(
+                    |(id_str, sym, shares, entry_price, entry_str)| OpenPosition {
+                        id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::nil()),
+                        symbol: Symbol::new(&sym),
+                        shares: f2d(shares),
+                        entry_price: f2d(entry_price),
+                        entry_at: parse_datetime_utc(&entry_str),
+                    },
+                )
                 .collect();
 
             // Estimate portfolio value from positions × latest close.
@@ -1072,9 +1139,7 @@ impl PortfolioStorage for DuckDatabase {
 
             // Get peak value for drawdown.
             let peak: f64 = {
-                let mut s = conn.prepare(
-                    "SELECT MAX(peak_value) FROM portfolio_equity",
-                )?;
+                let mut s = conn.prepare("SELECT MAX(peak_value) FROM portfolio_equity")?;
                 s.query_map([], |r| r.get::<_, f64>(0))?
                     .filter_map(|r| r.ok())
                     .next()
@@ -1106,7 +1171,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let row = row.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             conn.execute(
                 "INSERT INTO strategy_configs \
                     (id, name, description, composition, plugins_json, parameters_json, \
@@ -1139,7 +1206,9 @@ impl StrategyStorage for DuckDatabase {
         let table = self.t_strategy_configs();
         let id_str = id.to_string();
         tokio::task::spawn_blocking(move || -> StorageResult<Option<StrategyConfigRow>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(&format!(
                 "SELECT id, name, description, composition, plugins_json, parameters_json, \
                         enabled, auto_execute, execution_mode, version, created_at, updated_at \
@@ -1158,7 +1227,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let table = self.t_strategy_configs();
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<StrategyConfigRow>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(&format!(
                 "SELECT id, name, description, composition, plugins_json, parameters_json, \
                         enabled, auto_execute, execution_mode, version, created_at, updated_at \
@@ -1177,7 +1248,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let row = row.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             conn.execute(
                 "UPDATE strategy_configs SET \
                     name=?, description=?, composition=?, plugins_json=?, parameters_json=?, \
@@ -1207,7 +1280,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let row = row.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             conn.execute(
                 "INSERT INTO strategy_runs \
                     (id, config_id, started_at, status, signal_count, \
@@ -1233,7 +1308,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let row = row.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             conn.execute(
                 "UPDATE strategy_runs SET \
                     completed_at=?, status=?, signal_count=?, error_message=? \
@@ -1256,7 +1333,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let id_str = id.to_string();
         tokio::task::spawn_blocking(move || -> StorageResult<Option<StrategyRunRow>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "SELECT id, config_id, started_at, completed_at, status, signal_count, \
                         error_message, config_snapshot_json \
@@ -1280,7 +1359,9 @@ impl StrategyStorage for DuckDatabase {
         let cid = config_id.map(|id| id.to_string());
         let lim = limit.unwrap_or(50) as i64;
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<StrategyRunRow>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let sql = match &cid {
                 Some(id) => format!(
                     "SELECT id, config_id, started_at, completed_at, status, signal_count, \
@@ -1310,7 +1391,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let rows: Vec<StrategySignalRow> = rows.to_vec();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "INSERT INTO strategy_signals \
                     (id, run_id, config_id, symbol, direction, identifier_score, timing_score, \
@@ -1356,12 +1439,22 @@ impl StrategyStorage for DuckDatabase {
         let since_str = since.map(|d| d.to_string());
         let lim = limit.unwrap_or(200) as i64;
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<StrategySignalRow>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut conditions = Vec::new();
-            if let Some(id) = &rid { conditions.push(format!("run_id='{id}'")); }
-            if let Some(id) = &cid { conditions.push(format!("config_id='{id}'")); }
-            if let Some(s) = &sym { conditions.push(format!("symbol='{s}'")); }
-            if let Some(d) = &since_str { conditions.push(format!("emitted_at>='{d}'")); }
+            if let Some(id) = &rid {
+                conditions.push(format!("run_id='{id}'"));
+            }
+            if let Some(id) = &cid {
+                conditions.push(format!("config_id='{id}'"));
+            }
+            if let Some(s) = &sym {
+                conditions.push(format!("symbol='{s}'"));
+            }
+            if let Some(d) = &since_str {
+                conditions.push(format!("emitted_at>='{d}'"));
+            }
             let where_clause = if conditions.is_empty() {
                 String::new()
             } else {
@@ -1387,7 +1480,9 @@ impl StrategyStorage for DuckDatabase {
         let conn = self.conn.clone();
         let id_str = id.to_string();
         tokio::task::spawn_blocking(move || -> StorageResult<Option<StrategySignalRow>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "SELECT id, run_id, config_id, symbol, direction, identifier_score, \
                         timing_score, position_shares, position_notional, portfolio_fraction, \
@@ -1411,7 +1506,9 @@ impl BacktestStorage for DuckDatabase {
         let conn = self.conn.clone();
         let row = row.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             conn.execute(
                 "INSERT INTO backtest_runs \
                     (id, config_id, config_snapshot_json, from_date, to_date, \
@@ -1438,7 +1535,9 @@ impl BacktestStorage for DuckDatabase {
         let conn = self.conn.clone();
         let row = row.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             conn.execute(
                 "UPDATE backtest_runs SET \
                     final_capital=?, cagr=?, sharpe_ratio=?, sortino_ratio=?, \
@@ -1533,7 +1632,9 @@ impl BacktestStorage for DuckDatabase {
         let conn = self.conn.clone();
         let rows: Vec<BacktestTradeRow> = rows.to_vec();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "INSERT INTO backtest_trades \
                     (id, run_id, symbol, direction, entry_date, entry_price, \
@@ -1567,7 +1668,9 @@ impl BacktestStorage for DuckDatabase {
         let conn = self.conn.clone();
         let id_str = run_id.to_string();
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<BacktestTradeRow>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "SELECT id, run_id, symbol, direction, entry_date, entry_price, \
                         exit_date, exit_price, shares, gross_pnl, commission, net_pnl, hold_days \
@@ -1586,7 +1689,9 @@ impl BacktestStorage for DuckDatabase {
         let conn = self.conn.clone();
         let points: Vec<EquityCurvePoint> = points.to_vec();
         tokio::task::spawn_blocking(move || -> StorageResult<()> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "INSERT INTO backtest_equity_curve (run_id, date, portfolio_value, cash, drawdown) \
                  VALUES (?, ?, ?, ?, ?) \
@@ -1613,13 +1718,138 @@ impl BacktestStorage for DuckDatabase {
         let conn = self.conn.clone();
         let id_str = run_id.to_string();
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<EquityCurvePoint>> {
-            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
                 "SELECT run_id, date, portfolio_value, cash, drawdown \
                  FROM backtest_equity_curve WHERE run_id=? ORDER BY date ASC",
             )?;
             Ok(stmt
                 .query_map([&id_str], duck_row_to_equity_point)?
+                .filter_map(|r| r.ok())
+                .collect())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+}
+
+// ── ChatStorage ──────────────────────────────────────────────────────────────
+
+impl ChatStorage for DuckDatabase {
+    async fn upsert_chat_session(&self, row: &ChatSessionRow) -> StorageResult<()> {
+        let conn = self.conn.clone();
+        let row = row.clone();
+        tokio::task::spawn_blocking(move || -> StorageResult<()> {
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
+            conn.execute(
+                "INSERT INTO chat_sessions \
+                    (id, title, persona_id, depth, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?) \
+                 ON CONFLICT (id) DO UPDATE SET \
+                    title=excluded.title, persona_id=excluded.persona_id, depth=excluded.depth, \
+                    updated_at=excluded.updated_at",
+                params![
+                    row.id.to_string(),
+                    row.title,
+                    row.persona_id,
+                    row.depth,
+                    row.created_at.to_rfc3339(),
+                    row.updated_at.to_rfc3339(),
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn list_chat_sessions(&self, limit: Option<u32>) -> StorageResult<Vec<ChatSessionRow>> {
+        let conn = self.conn.clone();
+        let limit = limit.unwrap_or(50).min(200) as i64;
+        tokio::task::spawn_blocking(move || -> StorageResult<Vec<ChatSessionRow>> {
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, title, persona_id, depth, created_at, updated_at \
+                 FROM chat_sessions ORDER BY updated_at DESC LIMIT ?",
+            )?;
+            Ok(stmt
+                .query_map([limit], duck_row_to_chat_session)?
+                .filter_map(|r| r.ok())
+                .collect())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn get_chat_session(&self, id: Uuid) -> StorageResult<Option<ChatSessionRow>> {
+        let conn = self.conn.clone();
+        let id_str = id.to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<Option<ChatSessionRow>> {
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, title, persona_id, depth, created_at, updated_at \
+                 FROM chat_sessions WHERE id=?",
+            )?;
+            Ok(stmt
+                .query_map([&id_str], duck_row_to_chat_session)?
+                .filter_map(|r| r.ok())
+                .next())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn insert_chat_messages(&self, rows: &[ChatMessageRow]) -> StorageResult<()> {
+        let conn = self.conn.clone();
+        let rows = rows.to_vec();
+        tokio::task::spawn_blocking(move || -> StorageResult<()> {
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
+            for row in rows {
+                conn.execute(
+                    "INSERT INTO chat_messages \
+                        (id, session_id, ordinal, role, content, created_at) \
+                     VALUES (?, ?, ?, ?, ?, ?) \
+                     ON CONFLICT (session_id, ordinal) DO UPDATE SET \
+                        role=excluded.role, content=excluded.content, created_at=excluded.created_at",
+                    params![
+                        row.id.to_string(),
+                        row.session_id.to_string(),
+                        row.ordinal,
+                        row.role,
+                        row.content,
+                        row.created_at.to_rfc3339(),
+                    ],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    async fn list_chat_messages(&self, session_id: Uuid) -> StorageResult<Vec<ChatMessageRow>> {
+        let conn = self.conn.clone();
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<Vec<ChatMessageRow>> {
+            let conn = conn
+                .lock()
+                .map_err(|e| StorageError::Provider(e.to_string()))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, session_id, ordinal, role, content, created_at \
+                 FROM chat_messages WHERE session_id=? ORDER BY ordinal ASC",
+            )?;
+            Ok(stmt
+                .query_map([&session_id], duck_row_to_chat_message)?
                 .filter_map(|r| r.ok())
                 .collect())
         })
@@ -1910,6 +2140,34 @@ fn duck_row_to_equity_point(row: &duckdb::Row) -> duckdb::Result<EquityCurvePoin
         portfolio_value: f2d(row.get::<_, f64>(2).unwrap_or(0.0)),
         cash: f2d(row.get::<_, f64>(3).unwrap_or(0.0)),
         drawdown: f2d(row.get::<_, f64>(4).unwrap_or(0.0)),
+    })
+}
+
+fn duck_row_to_chat_session(row: &duckdb::Row) -> duckdb::Result<ChatSessionRow> {
+    let id_str: String = row.get(0)?;
+    let created_str: String = row.get(4)?;
+    let updated_str: String = row.get(5)?;
+    Ok(ChatSessionRow {
+        id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::nil()),
+        title: row.get(1)?,
+        persona_id: row.get(2)?,
+        depth: row.get(3)?,
+        created_at: parse_datetime_utc(&created_str),
+        updated_at: parse_datetime_utc(&updated_str),
+    })
+}
+
+fn duck_row_to_chat_message(row: &duckdb::Row) -> duckdb::Result<ChatMessageRow> {
+    let id_str: String = row.get(0)?;
+    let session_id_str: String = row.get(1)?;
+    let created_str: String = row.get(5)?;
+    Ok(ChatMessageRow {
+        id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::nil()),
+        session_id: Uuid::parse_str(&session_id_str).unwrap_or_else(|_| Uuid::nil()),
+        ordinal: row.get(2)?,
+        role: row.get(3)?,
+        content: row.get(4)?,
+        created_at: parse_datetime_utc(&created_str),
     })
 }
 

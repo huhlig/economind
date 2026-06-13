@@ -39,10 +39,8 @@ pub fn start(state: AppState) {
 
     let bars_time = parse_hh_mm("ECONOMIND_SCHED_BARS_HH_MM", &cfg.schedule.bars_utc);
     let macro_time = parse_hh_mm("ECONOMIND_SCHED_MACRO_HH_MM", &cfg.schedule.macro_utc);
-    let fund_time =
-        parse_hh_mm("ECONOMIND_SCHED_FUND_HH_MM", &cfg.schedule.fundamentals_utc);
-    let strategy_time =
-        parse_hh_mm("ECONOMIND_SCHED_STRATEGY_HH_MM", &cfg.schedule.strategy_utc);
+    let fund_time = parse_hh_mm("ECONOMIND_SCHED_FUND_HH_MM", &cfg.schedule.fundamentals_utc);
+    let strategy_time = parse_hh_mm("ECONOMIND_SCHED_STRATEGY_HH_MM", &cfg.schedule.strategy_utc);
     let bars_lookback: i64 = std::env::var("ECONOMIND_SCHED_BARS_LOOKBACK")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -93,9 +91,7 @@ async fn job_bars(store: DataStore, at: NaiveTime, lookback_days: i64) {
         sleep_until(next_daily(at)).await;
         info!("Scheduler: starting bar ingestion");
 
-        let since = Some(
-            (Utc::now() - chrono::Duration::days(lookback_days)).date_naive(),
-        );
+        let since = Some((Utc::now() - chrono::Duration::days(lookback_days)).date_naive());
         let yahoo = YahooFinanceConnector::new().with_concurrency(4);
         let manager = DataFeedManager::new(DataFeedManagerConfig::default()).with_yahoo(yahoo);
         let result = manager.run_bars(&store, since).await;
@@ -136,7 +132,10 @@ async fn job_macro(store: DataStore, at: NaiveTime) {
                 "Scheduler: macro ingestion completed with errors"
             );
         } else {
-            info!(ok = result.symbols_ok, "Scheduler: macro ingestion complete");
+            info!(
+                ok = result.symbols_ok,
+                "Scheduler: macro ingestion complete"
+            );
         }
     }
 }
@@ -215,14 +214,13 @@ async fn job_strategy(
         }
 
         for config_row in configs {
-            let plugins: Vec<PluginSpec> =
-                match serde_json::from_str(&config_row.plugins_json) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        error!(config=%config_row.id, "Scheduler: invalid plugins JSON: {e}");
-                        continue;
-                    }
-                };
+            let plugins: Vec<PluginSpec> = match serde_json::from_str(&config_row.plugins_json) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!(config=%config_row.id, "Scheduler: invalid plugins JSON: {e}");
+                    continue;
+                }
+            };
             let parameters: HashMap<String, String> =
                 match serde_json::from_str(&config_row.parameters_json) {
                     Ok(p) => p,
@@ -240,7 +238,7 @@ async fn job_strategy(
                     continue;
                 }
             };
-            let execution_mode = ExecutionMode::from_str(&config_row.execution_mode);
+            let execution_mode = ExecutionMode::parse_lossy(&config_row.execution_mode);
 
             let strategy_config = StrategyConfig {
                 id: config_row.id,
@@ -387,14 +385,16 @@ async fn execute_signals(
     let portfolio_value = account.portfolio_value;
 
     // Load DB portfolio state for drawdown (broker doesn't report it directly).
-    let portfolio_state = store.load_portfolio_state().await.unwrap_or_else(|_| {
-        economind_db::PortfolioState {
-            open_positions: vec![],
-            portfolio_value: Decimal::ZERO,
-            available_cash: Decimal::ZERO,
-            current_drawdown: Decimal::ZERO,
-        }
-    });
+    let portfolio_state =
+        store
+            .load_portfolio_state()
+            .await
+            .unwrap_or_else(|_| economind_db::PortfolioState {
+                open_positions: vec![],
+                portfolio_value: Decimal::ZERO,
+                available_cash: Decimal::ZERO,
+                current_drawdown: Decimal::ZERO,
+            });
 
     let drawdown_f64: f64 = portfolio_state.current_drawdown.try_into().unwrap_or(0.0);
     if drawdown_f64 >= max_drawdown_pct {
@@ -430,9 +430,7 @@ async fn execute_signals(
 
         // Max position pct check.
         if portfolio_value > Decimal::ZERO {
-            let notional = sig
-                .notional
-                .unwrap_or(shares * Decimal::from(100)); // rough fallback
+            let notional = sig.notional.unwrap_or(shares * Decimal::from(100)); // rough fallback
             let fraction: f64 = (notional / portfolio_value).try_into().unwrap_or(1.0);
             if fraction > max_position_pct {
                 warn!(
@@ -477,12 +475,20 @@ async fn execute_signals(
                     "execute_signals: order submitted"
                 );
                 if notifications.on_order {
-                    send_order_notification(notifications, &result.symbol, side, shares, &result.broker_order_id).await;
+                    send_order_notification(
+                        notifications,
+                        &result.symbol,
+                        side,
+                        shares,
+                        &result.broker_order_id,
+                    )
+                    .await;
                 }
             }
             Err(e) => {
                 error!(symbol=%sym_str, "execute_signals: order failed: {e}");
-                send_error_notification(notifications, &format!("Order for {sym_str} failed: {e}")).await;
+                send_error_notification(notifications, &format!("Order for {sym_str} failed: {e}"))
+                    .await;
             }
         }
     }
@@ -502,8 +508,12 @@ async fn send_signal_notification(
     sig: &PersistedSignal,
     strategy_name: &str,
 ) {
-    let Some(url) = cfg.webhook_url.as_deref() else { return };
-    if url.is_empty() { return }
+    let Some(url) = cfg.webhook_url.as_deref() else {
+        return;
+    };
+    if url.is_empty() {
+        return;
+    }
 
     let payload = serde_json::json!({
         "event": "signal_emitted",
@@ -522,8 +532,12 @@ async fn send_run_complete_notification(
     strategy_name: &str,
     signal_count: usize,
 ) {
-    let Some(url) = cfg.webhook_url.as_deref() else { return };
-    if url.is_empty() { return }
+    let Some(url) = cfg.webhook_url.as_deref() else {
+        return;
+    };
+    if url.is_empty() {
+        return;
+    }
 
     let payload = serde_json::json!({
         "event": "run_complete",
@@ -541,8 +555,12 @@ async fn send_order_notification(
     shares: Decimal,
     order_id: &str,
 ) {
-    let Some(url) = cfg.webhook_url.as_deref() else { return };
-    if url.is_empty() { return }
+    let Some(url) = cfg.webhook_url.as_deref() else {
+        return;
+    };
+    if url.is_empty() {
+        return;
+    }
 
     let payload = serde_json::json!({
         "event": "order_submitted",
@@ -556,9 +574,15 @@ async fn send_order_notification(
 }
 
 async fn send_error_notification(cfg: &NotificationsConfig, message: &str) {
-    if !cfg.on_error { return }
-    let Some(url) = cfg.webhook_url.as_deref() else { return };
-    if url.is_empty() { return }
+    if !cfg.on_error {
+        return;
+    }
+    let Some(url) = cfg.webhook_url.as_deref() else {
+        return;
+    };
+    if url.is_empty() {
+        return;
+    }
 
     let payload = serde_json::json!({
         "event": "error",
@@ -574,8 +598,7 @@ fn next_daily(time: NaiveTime) -> Instant {
     let now_utc = Utc::now();
     let today = now_utc.date_naive();
     let candidate = today.and_time(time);
-    let candidate_utc =
-        chrono::DateTime::<Utc>::from_naive_utc_and_offset(candidate, Utc);
+    let candidate_utc = chrono::DateTime::<Utc>::from_naive_utc_and_offset(candidate, Utc);
     let target = if candidate_utc > now_utc {
         candidate_utc
     } else {
@@ -597,20 +620,20 @@ fn next_weekly(weekday: Weekday, time: NaiveTime) -> Instant {
         let cw = today_weekday.num_days_from_monday();
         let d = (tw + 7 - cw) % 7;
         if d == 0 {
-            let candidate = chrono::DateTime::<Utc>::from_naive_utc_and_offset(
-                today.and_time(time),
-                Utc,
-            );
-            if candidate <= now_utc { 7 } else { 0 }
+            let candidate =
+                chrono::DateTime::<Utc>::from_naive_utc_and_offset(today.and_time(time), Utc);
+            if candidate <= now_utc {
+                7
+            } else {
+                0
+            }
         } else {
             d
         }
     };
     let target_date = today + chrono::Duration::days(days_ahead as i64);
-    let target = chrono::DateTime::<Utc>::from_naive_utc_and_offset(
-        target_date.and_time(time),
-        Utc,
-    );
+    let target =
+        chrono::DateTime::<Utc>::from_naive_utc_and_offset(target_date.and_time(time), Utc);
     let duration = (target - now_utc)
         .to_std()
         .unwrap_or(std::time::Duration::ZERO);

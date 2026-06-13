@@ -78,7 +78,7 @@
     submitting = true;
     try {
       const run = await backtest.run({
-        strategy_config_id: formStrategyId,
+        config_id: formStrategyId,
         from_date: formFrom,
         to_date: formTo,
         initial_capital: parseFloat(formCapital),

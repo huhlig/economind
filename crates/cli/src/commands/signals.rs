@@ -36,12 +36,8 @@ pub struct SignalsArgs {
     pub config: Option<Uuid>,
 }
 
-pub async fn execute(
-    args: SignalsArgs,
-    duckdb_path: &str,
-) -> anyhow::Result<()> {
-    let store = DataStore::open(duckdb_path)
-        .context("Failed to open DataStore")?;
+pub async fn execute(args: SignalsArgs, duckdb_path: &str) -> anyhow::Result<()> {
+    let store = DataStore::open(duckdb_path).context("Failed to open DataStore")?;
 
     let symbol = args.symbol.as_deref().map(Symbol::new);
 

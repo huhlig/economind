@@ -515,15 +515,20 @@ impl ServerHandler for EconomindMcpServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResult, McpError>> + Send + '_ {
-        self.tool_router.call(ToolCallContext::new(self, request, context))
+        self.tool_router
+            .call(ToolCallContext::new(self, request, context))
     }
 
-    fn list_tools(
+    async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
-        async { Ok(ListToolsResult { tools: self.tool_router.list_all(), next_cursor: None, meta: None }) }
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult {
+            tools: self.tool_router.list_all(),
+            next_cursor: None,
+            meta: None,
+        })
     }
 }
 

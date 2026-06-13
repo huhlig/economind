@@ -1,0 +1,6 @@
+[env]
+# MSVC 14.41+ (VS 2022 17.11+) is stricter about noexcept in template
+# instantiations.  Without /EHsc the compiler treats all functions as
+# noexcept(false) in an inconsistent way that breaks std::pair's
+# piecewise-construction path used by bundled DuckDB.
+CXXFLAGS = "/EHsc /std:c++17"

@@ -332,7 +332,7 @@ fn approx_equal(a: f64, b: f64, tolerance: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDateTime;
+    use chrono::{DateTime, NaiveDateTime};
     use economind_core::model::{
         analysis::{Pivot, PivotType},
         CandleEntry, PatternType,
@@ -345,7 +345,9 @@ mod tests {
     }
 
     fn ts(secs: i64) -> NaiveDateTime {
-        NaiveDateTime::from_timestamp_opt(86400 * secs, 0).unwrap()
+        DateTime::from_timestamp(86400 * secs, 0)
+            .unwrap()
+            .naive_utc()
     }
 
     fn candle(secs: i64, high: &str, low: &str, close: &str) -> CandleEntry {

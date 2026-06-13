@@ -16,7 +16,6 @@ use axum::{
 };
 use chrono::Utc;
 use economind_db::{StrategyConfigRow, StrategyStorage};
-use economind_strategy::config::{CompositionMode, ExecutionMode, PluginSpec, StrategyConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -30,7 +29,7 @@ use crate::{
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/strategy/configs", get(list_configs))
-        .route("/strategy/configs/:id", get(get_config).put(update_config))
+        .route("/strategy/configs/{id}", get(get_config).put(update_config))
         .route("/strategy/run", post(trigger_run))
 }
 
@@ -181,35 +180,8 @@ async fn trigger_run(
         .map_err(ApiError::Storage)?
         .ok_or(ApiError::NotFound)?;
 
-    // Reconstruct StrategyConfig.
-    let plugins: Vec<PluginSpec> = serde_json::from_str(&config_row.plugins_json)
-        .map_err(|e| ApiError::BadRequest(format!("invalid plugins JSON: {e}")))?;
-    let parameters: HashMap<String, String> = serde_json::from_str(&config_row.parameters_json)
-        .map_err(|e| ApiError::BadRequest(format!("invalid parameters JSON: {e}")))?;
-    let composition = match config_row.composition.as_str() {
-        "pipeline" => CompositionMode::Pipeline,
-        "voting" => CompositionMode::Voting,
-        "ensemble" => CompositionMode::Ensemble,
-        other => {
-            return Err(ApiError::BadRequest(format!(
-                "unknown composition: {other}"
-            )))
-        }
-    };
-    let strategy_config = StrategyConfig {
-        id: config_row.id,
-        name: config_row.name,
-        description: config_row.description,
-        composition,
-        plugins,
-        parameters,
-        enabled: config_row.enabled,
-        auto_execute: config_row.auto_execute,
-        execution_mode: ExecutionMode::from_str(&config_row.execution_mode),
-        version: config_row.version,
-        created_at: config_row.created_at,
-        updated_at: config_row.updated_at,
-    };
+    let strategy_config = crate::pipeline_factory::strategy_config_from_row(config_row)
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
     // Build pipeline from registered plugins.
     let pipeline = crate::pipeline_factory::build_pipeline(&strategy_config)

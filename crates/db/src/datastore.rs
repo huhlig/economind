@@ -8,10 +8,10 @@
 //! materialise hot tables into an attached `:memory:` schema for fast reads.
 
 use crate::storage::{
-    BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, DuckDatabase,
-    EquityCurvePoint, MacroSeriesPoint, MacroStorage, MetadataStorage, PortfolioState,
-    PortfolioStorage, StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage,
-    TickStorage, TickerQuery,
+    BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, ChatMessageRow,
+    ChatSessionRow, ChatStorage, DuckDatabase, EquityCurvePoint, MacroSeriesPoint, MacroStorage,
+    MetadataStorage, PortfolioState, PortfolioStorage, StrategyConfigRow, StrategyRunRow,
+    StrategySignalRow, StrategyStorage, TickStorage, TickerQuery,
 };
 use crate::StorageResult;
 use chrono::{NaiveDate, NaiveDateTime};
@@ -58,6 +58,16 @@ impl DataStore {
     pub fn duck(&self) -> &DuckDatabase {
         &self.duck
     }
+
+    /// Read a runtime setting from DuckDB.
+    pub async fn get_setting(&self, key: &str) -> StorageResult<Option<String>> {
+        self.duck.get_setting(key).await
+    }
+
+    /// Upsert a runtime setting in DuckDB.
+    pub async fn set_setting(&self, key: &str, value: &str) -> StorageResult<()> {
+        self.duck.set_setting(key, value).await
+    }
 }
 
 // ── MetadataStorage ──────────────────────────────────────────────────────────
@@ -66,7 +76,10 @@ impl MetadataStorage for DataStore {
     async fn list_tickers(&self) -> StorageResult<BoxStream<'static, Symbol>> {
         self.duck.list_tickers().await
     }
-    async fn query_tickers<'a>(&'a self, query: TickerQuery) -> StorageResult<BoxStream<'a, Ticker>> {
+    async fn query_tickers<'a>(
+        &'a self,
+        query: TickerQuery,
+    ) -> StorageResult<BoxStream<'a, Ticker>> {
         self.duck.query_tickers(query).await
     }
     async fn get_ticker(&self, symbol: &Symbol) -> StorageResult<Option<Ticker>> {
@@ -113,7 +126,9 @@ impl MetadataStorage for DataStore {
         symbol: Option<&Symbol>,
         time_range: Option<Range<NaiveDate>>,
     ) -> StorageResult<Vec<CashFlowStatement>> {
-        self.duck.query_cash_flow_statements(symbol, time_range).await
+        self.duck
+            .query_cash_flow_statements(symbol, time_range)
+            .await
     }
     async fn insert_dividend_report(&self, items: &[DividendEvent]) -> StorageResult<()> {
         self.duck.insert_dividend_report(items).await
@@ -156,7 +171,11 @@ impl CandleStorage for DataStore {
     ) -> StorageResult<Vec<CandleEntry>> {
         self.duck.query_candles(symbol, interval, time_range).await
     }
-    async fn unsert_daily_candle(&self, symbol: &Symbol, bars: &[DailyCandleEntry]) -> StorageResult<()> {
+    async fn unsert_daily_candle(
+        &self,
+        symbol: &Symbol,
+        bars: &[DailyCandleEntry],
+    ) -> StorageResult<()> {
         self.duck.unsert_daily_candle(symbol, bars).await
     }
     async fn query_daily_candles<'a>(
@@ -254,7 +273,9 @@ impl StrategyStorage for DataStore {
         since: Option<NaiveDate>,
         limit: Option<u32>,
     ) -> StorageResult<Vec<StrategySignalRow>> {
-        self.duck.query_strategy_signals(run_id, config_id, symbol, since, limit).await
+        self.duck
+            .query_strategy_signals(run_id, config_id, symbol, since, limit)
+            .await
     }
     async fn get_strategy_signal(&self, id: Uuid) -> StorageResult<Option<StrategySignalRow>> {
         self.duck.get_strategy_signal(id).await
@@ -291,5 +312,29 @@ impl BacktestStorage for DataStore {
     }
     async fn get_equity_curve(&self, run_id: Uuid) -> StorageResult<Vec<EquityCurvePoint>> {
         self.duck.get_equity_curve(run_id).await
+    }
+}
+
+// ── ChatStorage ──────────────────────────────────────────────────────────────
+
+impl ChatStorage for DataStore {
+    async fn upsert_chat_session(&self, row: &ChatSessionRow) -> StorageResult<()> {
+        self.duck.upsert_chat_session(row).await
+    }
+
+    async fn list_chat_sessions(&self, limit: Option<u32>) -> StorageResult<Vec<ChatSessionRow>> {
+        self.duck.list_chat_sessions(limit).await
+    }
+
+    async fn get_chat_session(&self, id: Uuid) -> StorageResult<Option<ChatSessionRow>> {
+        self.duck.get_chat_session(id).await
+    }
+
+    async fn insert_chat_messages(&self, rows: &[ChatMessageRow]) -> StorageResult<()> {
+        self.duck.insert_chat_messages(rows).await
+    }
+
+    async fn list_chat_messages(&self, session_id: Uuid) -> StorageResult<Vec<ChatMessageRow>> {
+        self.duck.list_chat_messages(session_id).await
     }
 }

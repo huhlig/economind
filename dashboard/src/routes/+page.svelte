@@ -4,12 +4,12 @@
   import type { PortfolioSummary, Signal, StrategyConfig, BacktestRun } from '$lib/api.js';
   import { eventLog } from '$lib/stores/events.js';
 
-  let portfolioData = $state(null);
-  let recentSignals = $state([]);
-  let strategies = $state([]);
-  let recentBacktests = $state([]);
+  let portfolioData = $state<PortfolioSummary | null>(null);
+  let recentSignals = $state<Signal[]>([]);
+  let strategies = $state<StrategyConfig[]>([]);
+  let recentBacktests = $state<BacktestRun[]>([]);
   let loading = $state(true);
-  let error = $state(null);
+  let error = $state<string | null>(null);
 
   onMount(async () => {
     try {
@@ -36,16 +36,16 @@
     }
   });
 
-  function fmt(n, decimals = 2) {
+  function fmt(n: number, decimals = 2) {
     return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   }
 
-  function fmtPct(n) {
+  function fmtPct(n: number) {
     const s = fmt(Math.abs(n) * 100);
     return (n >= 0 ? '+' : '−') + s + '%';
   }
 
-  function pnlColor(n) {
+  function pnlColor(n: number) {
     return n >= 0 ? 'var(--color-accent-green)' : 'var(--color-accent-red)';
   }
 </script>
@@ -164,7 +164,7 @@
       <div class="rounded-xl p-4" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
         <div class="flex items-center justify-between mb-3">
           <span class="text-sm font-medium" style="color: var(--color-text-primary)">Recent Backtests</span>
-          <a href="/crates/backtest" class="text-xs" style="color: var(--color-accent-blue)">View all →</a>
+          <a href="/backtest" class="text-xs" style="color: var(--color-accent-blue)">View all →</a>
         </div>
         {#if recentBacktests.length === 0}
           <p class="text-xs" style="color: var(--color-text-muted)">No backtests run yet.</p>

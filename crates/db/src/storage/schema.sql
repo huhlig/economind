@@ -236,3 +236,32 @@ CREATE TABLE IF NOT EXISTS portfolio_equity (
     cash            DOUBLE NOT NULL DEFAULT 0.0,
     peak_value      DOUBLE NOT NULL
 );
+
+-- ── Agent chat sessions ─────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+    title       TEXT NOT NULL DEFAULT 'New chat',
+    persona_id  TEXT,
+    depth       TEXT,
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+    session_id  TEXT      NOT NULL,
+    ordinal     INTEGER   NOT NULL,
+    role        TEXT      NOT NULL,
+    content     TEXT      NOT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (session_id, ordinal)
+);
+
+-- ── Runtime settings ────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

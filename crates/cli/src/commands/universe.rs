@@ -44,8 +44,7 @@ pub enum UniverseCommand {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub async fn execute(args: UniverseArgs, duckdb_path: &str) -> Result<()> {
-    let store = DataStore::open(duckdb_path)
-        .context("opening database")?;
+    let store = DataStore::open(duckdb_path).context("opening database")?;
 
     match args.command {
         UniverseCommand::List => list(&store).await,
@@ -87,8 +86,8 @@ async fn add(store: &DataStore, symbols: Vec<String>) -> Result<()> {
 }
 
 async fn load(store: &DataStore, path: &str) -> Result<()> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("reading universe file: {path}"))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("reading universe file: {path}"))?;
 
     let mut reader = csv::Reader::from_reader(content.as_bytes());
 

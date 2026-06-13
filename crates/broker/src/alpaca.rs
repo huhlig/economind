@@ -37,8 +37,10 @@ impl AlpacaConnector {
     ///
     /// Reads `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, and `ALPACA_PAPER`.
     pub fn from_env() -> BrokerResult<Self> {
-        let key_id = std::env::var("ALPACA_KEY_ID")
-            .map_err(|_| BrokerError::Api { status: 0, message: "ALPACA_KEY_ID not set".into() })?;
+        let key_id = std::env::var("ALPACA_KEY_ID").map_err(|_| BrokerError::Api {
+            status: 0,
+            message: "ALPACA_KEY_ID not set".into(),
+        })?;
         let secret = std::env::var("ALPACA_SECRET_KEY").map_err(|_| BrokerError::Api {
             status: 0,
             message: "ALPACA_SECRET_KEY not set".into(),
@@ -53,7 +55,10 @@ impl AlpacaConnector {
     /// Build with explicit credentials.
     pub fn new(key_id: String, secret_key: String, paper: bool) -> BrokerResult<Self> {
         let mut headers = header::HeaderMap::new();
-        headers.insert("APCA-API-KEY-ID", header::HeaderValue::from_str(&key_id).unwrap());
+        headers.insert(
+            "APCA-API-KEY-ID",
+            header::HeaderValue::from_str(&key_id).unwrap(),
+        );
         headers.insert(
             "APCA-API-SECRET-KEY",
             header::HeaderValue::from_str(&secret_key).unwrap(),
@@ -85,7 +90,10 @@ impl AlpacaConnector {
             .ok()
             .and_then(|v| v["message"].as_str().map(String::from))
             .unwrap_or(body);
-        Err(BrokerError::Api { status: code, message })
+        Err(BrokerError::Api {
+            status: code,
+            message,
+        })
     }
 }
 
@@ -196,10 +204,17 @@ impl BrokerConnector for AlpacaConnector {
         Ok(OrderResult {
             broker_order_id: order.id,
             symbol: order.symbol,
-            side: if order.side == "buy" { OrderSide::Buy } else { OrderSide::Sell },
+            side: if order.side == "buy" {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            },
             requested_shares: parse_decimal(&order.qty, "qty")?,
             filled_shares: parse_decimal(&order.filled_qty, "filled_qty")?,
-            avg_fill_price: parse_decimal_opt(order.filled_avg_price.as_deref(), "filled_avg_price")?,
+            avg_fill_price: parse_decimal_opt(
+                order.filled_avg_price.as_deref(),
+                "filled_avg_price",
+            )?,
             status,
             submitted_at: parse_submitted_at(&order.submitted_at),
         })

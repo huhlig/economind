@@ -4,6 +4,7 @@
 
 pub mod analyze;
 pub mod backtest;
+pub mod datafeed;
 pub mod ingest;
 pub mod run;
 pub mod signals;

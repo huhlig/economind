@@ -21,7 +21,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::NaiveDate;
 use economind_core::model::{DailyCandleEntry, Symbol};
-use economind_db::{CandleStorage, DataStore, MacroStorage, MetadataStorage, PortfolioStorage, StrategyStorage};
+use economind_db::{
+    CandleStorage, DataStore, MacroStorage, MetadataStorage, PortfolioStorage, StrategyStorage,
+};
 use futures::StreamExt;
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::message::{AssistantContent, Message, Text, UserContent};
@@ -413,33 +415,58 @@ pub struct ChatService {
 impl ChatService {
     /// Construct from an already-initialised Anthropic client.
     pub fn new(store: DataStore, client: anthropic::Client) -> Self {
-        let model = std::env::var("AGENT_MODEL")
-            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        let model =
+            std::env::var("AGENT_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        Self::new_with_model(store, client, model)
+    }
+
+    /// Construct from an already-initialised Anthropic client and explicit model.
+    pub fn new_with_model(
+        store: DataStore,
+        client: anthropic::Client,
+        model: impl Into<String>,
+    ) -> Self {
+        let model = model.into();
 
         let personas = PersonaRegistry::with_builtins();
 
         // Load JSON personas from the `personas/` directory next to the
         // working directory, or from PERSONAS_DIR env var if set.
-        let personas_dir = std::env::var("PERSONAS_DIR")
-            .unwrap_or_else(|_| "personas".to_string());
+        let personas_dir = std::env::var("PERSONAS_DIR").unwrap_or_else(|_| "personas".to_string());
         let (loaded, errors) = personas.load_dir(&personas_dir);
         if !loaded.is_empty() {
-            info!("Loaded {} persona(s) from {personas_dir}: {}", loaded.len(), loaded.join(", "));
+            info!(
+                "Loaded {} persona(s) from {personas_dir}: {}",
+                loaded.len(),
+                loaded.join(", ")
+            );
         }
         for e in errors {
             warn!("Persona load error: {e}");
         }
 
-        Self { store, client, model, personas }
+        Self {
+            store,
+            client,
+            model,
+            personas,
+        }
     }
 
     /// Construct from environment variables.  Returns `None` if
     /// `ANTHROPIC_API_KEY` is not set or is invalid.
     pub fn from_env(store: DataStore) -> Option<Self> {
+        let model =
+            std::env::var("AGENT_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        Self::from_env_with_model(store, model)
+    }
+
+    /// Construct from environment variables with an explicit model override.
+    pub fn from_env_with_model(store: DataStore, model: impl Into<String>) -> Option<Self> {
         let client = anthropic::Client::from_env()
             .map_err(|e| debug!("Chat agent disabled: {e}"))
             .ok()?;
-        Some(Self::new(store, client))
+        Some(Self::new_with_model(store, client, model))
     }
 
     /// Send `message` with optional prior `history` using the default
@@ -453,11 +480,21 @@ impl ChatService {
             .client
             .agent(&self.model)
             .preamble(SYSTEM_PROMPT)
-            .tool(GetSignalsTool { store: self.store.clone() })
-            .tool(GetInstrumentTool { store: self.store.clone() })
-            .tool(GetPortfolioTool { store: self.store.clone() })
-            .tool(QueryBarsTool { store: self.store.clone() })
-            .tool(GetMacroContextTool { store: self.store.clone() })
+            .tool(GetSignalsTool {
+                store: self.store.clone(),
+            })
+            .tool(GetInstrumentTool {
+                store: self.store.clone(),
+            })
+            .tool(GetPortfolioTool {
+                store: self.store.clone(),
+            })
+            .tool(QueryBarsTool {
+                store: self.store.clone(),
+            })
+            .tool(GetMacroContextTool {
+                store: self.store.clone(),
+            })
             .max_tokens(4096)
             .build();
 
@@ -509,9 +546,9 @@ impl ChatService {
         agent.chat(message, history, &ctx).await
     }
 
-    /// List all available personas as `(id, description)` pairs.
-    pub fn list_personas(&self) -> Vec<(String, String)> {
-        self.personas.list()
+    /// List user-facing personas as `(id, name, description)` triples.
+    pub fn list_personas(&self) -> Vec<(String, String, String)> {
+        self.personas.list_visible()
     }
 
     /// Register a custom persona at runtime.

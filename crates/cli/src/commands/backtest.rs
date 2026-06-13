@@ -18,11 +18,7 @@ use chrono::NaiveDate;
 use clap::{Args, Subcommand};
 use economind_backtest::BacktestRunner;
 use economind_db::{DataStore, StrategyStorage};
-use economind_strategy::{CompositionMode, PipelineRunnerBuilder, StrategyConfig};
 use rust_decimal::Decimal;
-use strategy_atr_sizer::AtrSizer;
-use strategy_mean_reversion::MeanReversionTimer;
-use strategy_momentum::MomentumIdentifier;
 use uuid::Uuid;
 
 // ── CLI types ─────────────────────────────────────────────────────────────────
@@ -85,24 +81,15 @@ pub struct BacktestListArgs {
 
 // ── Executor ──────────────────────────────────────────────────────────────────
 
-pub async fn execute(
-    args: BacktestArgs,
-    duckdb_path: &str,
-) -> anyhow::Result<()> {
+pub async fn execute(args: BacktestArgs, duckdb_path: &str) -> anyhow::Result<()> {
     match args.command {
         BacktestCommands::Run(run_args) => execute_run(run_args, duckdb_path).await,
-        BacktestCommands::List(list_args) => {
-            execute_list(list_args, duckdb_path).await
-        }
+        BacktestCommands::List(list_args) => execute_list(list_args, duckdb_path).await,
     }
 }
 
-async fn execute_run(
-    args: BacktestRunArgs,
-    duckdb_path: &str,
-) -> anyhow::Result<()> {
-    let store = DataStore::open(duckdb_path)
-        .context("Failed to open DataStore")?;
+async fn execute_run(args: BacktestRunArgs, duckdb_path: &str) -> anyhow::Result<()> {
+    let store = DataStore::open(duckdb_path).context("Failed to open DataStore")?;
 
     // Load strategy config.
     let config_row = store
@@ -111,24 +98,12 @@ async fn execute_run(
         .context("Failed to query strategy config")?
         .with_context(|| format!("Strategy config {} not found", args.strategy))?;
 
-    let config: StrategyConfig = serde_json::from_str(&config_row.parameters_json)
-        .or_else(|_| {
-            Ok::<StrategyConfig, serde_json::Error>(StrategyConfig::new(
-                &config_row.name,
-                match config_row.composition.as_str() {
-                    "voting" => CompositionMode::Voting,
-                    "ensemble" => CompositionMode::Ensemble,
-                    _ => CompositionMode::Pipeline,
-                },
-                vec![],
-                serde_json::from_str(&config_row.parameters_json).unwrap_or_default(),
-            ))
-        })
-        .context("Failed to deserialise strategy config")?;
-
     if !config_row.enabled {
         bail!("Strategy config {} is disabled", args.strategy);
     }
+
+    let config = economind_api::pipeline_factory::strategy_config_from_row(config_row)
+        .context("Failed to reconstruct strategy config")?;
 
     // Preload hot tables into memory for fast strategy reads.
     let lookback_days = ((args.to - args.from).num_days() + 400) as u32;
@@ -137,41 +112,8 @@ async fn execute_run(
         .await
         .context("Failed to preload hot data into memory")?;
 
-    // Build pipeline.
-    let params = &config.parameters;
-    let mut builder = PipelineRunnerBuilder::new();
-    let mut has_sizer = false;
-
-    for spec in &config.plugins {
-        match (spec.role.as_str(), spec.name.as_str()) {
-            ("identifier", "momentum") => {
-                builder = builder.identifier(MomentumIdentifier::new(params));
-            }
-            ("timer", "mean-reversion") => {
-                builder = builder.timer(MeanReversionTimer::new(params));
-            }
-            ("sizer", "atr-sizer") => {
-                builder = builder.sizer(AtrSizer::new(params));
-                has_sizer = true;
-            }
-            (role, name) => {
-                eprintln!("Warning: unknown plugin {role}:{name} — skipping");
-            }
-        }
-    }
-
-    if !has_sizer {
-        bail!(
-            "Config {} has no sizer plugin — cannot build pipeline",
-            args.strategy
-        );
-    }
-
-    let threshold: f64 = params
-        .get("score_threshold")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0.5);
-    let pipeline = builder.score_threshold(threshold).build();
+    let pipeline = economind_api::pipeline_factory::build_pipeline(&config)
+        .context("Failed to build strategy pipeline")?;
 
     let initial_capital =
         Decimal::try_from(args.initial_capital).context("Invalid initial_capital value")?;
@@ -207,14 +149,10 @@ async fn execute_run(
     Ok(())
 }
 
-async fn execute_list(
-    args: BacktestListArgs,
-    duckdb_path: &str,
-) -> anyhow::Result<()> {
+async fn execute_list(args: BacktestListArgs, duckdb_path: &str) -> anyhow::Result<()> {
     use economind_db::BacktestStorage;
 
-    let store = DataStore::open(duckdb_path)
-        .context("Failed to open DataStore")?;
+    let store = DataStore::open(duckdb_path).context("Failed to open DataStore")?;
 
     let runs = store
         .list_backtest_runs(args.strategy, Some(args.limit))

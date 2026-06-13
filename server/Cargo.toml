@@ -1,6 +1,0 @@
-[package]
-name = "economind-server"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]

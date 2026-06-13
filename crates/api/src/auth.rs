@@ -5,7 +5,7 @@
 //! API key authentication middleware (§5.A.2).
 //!
 //! Checks the `Authorization: Bearer <key>` header on every request to
-//! `/api/v1/` and `/graphql`.  Returns 401 if the header is absent or the
+//! `/api/v1/`.  Returns 401 if the header is absent or the
 //! key does not match the configured value.
 
 use crate::error::ApiError;

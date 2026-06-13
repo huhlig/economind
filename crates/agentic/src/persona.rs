@@ -122,6 +122,14 @@ pub trait Persona: Send + Sync + 'static {
     /// or when registering it as a sub-agent tool.
     fn description(&self) -> &str;
 
+    /// Whether this persona should appear in user-facing selectors.
+    ///
+    /// Hidden personas remain registered and can still be used as internal
+    /// delegates by other personas.
+    fn visible(&self) -> bool {
+        true
+    }
+
     /// System prompt injected as the agent's preamble.
     fn preamble(&self) -> String;
 
@@ -134,7 +142,9 @@ pub trait Persona: Send + Sync + 'static {
     /// Returning a non-empty list causes a [`DelegateToPersona`] tool to be
     /// injected into this persona's agent, scoped to exactly these IDs.
     /// An empty list (the default) means no delegation is available.
-    fn delegates(&self) -> Vec<String> { vec![] }
+    fn delegates(&self) -> Vec<String> {
+        vec![]
+    }
 
     /// Compute the active disclosure level from the current conversation
     /// context.  The default implementation uses turn count and depth hint.
@@ -188,16 +198,43 @@ impl PersonaRegistry {
 
     /// Look up a persona by ID.
     pub fn get(&self, id: &str) -> Option<Arc<dyn Persona>> {
-        self.inner.read().expect("persona registry poisoned").get(id).cloned()
+        self.inner
+            .read()
+            .expect("persona registry poisoned")
+            .get(id)
+            .cloned()
     }
 
-    /// List all registered persona IDs and descriptions.
-    pub fn list(&self) -> Vec<(String, String)> {
+    /// List all registered persona IDs, names, and descriptions.
+    pub fn list(&self) -> Vec<(String, String, String)> {
         self.inner
             .read()
             .expect("persona registry poisoned")
             .values()
-            .map(|p| (p.id().to_string(), p.description().to_string()))
+            .map(|p| {
+                (
+                    p.id().to_string(),
+                    p.name().to_string(),
+                    p.description().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    /// List personas intended for user-facing selection.
+    pub fn list_visible(&self) -> Vec<(String, String, String)> {
+        self.inner
+            .read()
+            .expect("persona registry poisoned")
+            .values()
+            .filter(|p| p.visible())
+            .map(|p| {
+                (
+                    p.id().to_string(),
+                    p.name().to_string(),
+                    p.description().to_string(),
+                )
+            })
             .collect()
     }
 }
@@ -291,16 +328,16 @@ impl PersonaAgent {
             }
         };
 
-        let reply = build_and_chat(
-            &self.client,
-            &self.model,
-            &preamble,
+        let reply = build_and_chat(BuildChatRequest {
+            client: &self.client,
+            model: &self.model,
+            preamble: &preamble,
             active,
-            self.store.clone(),
+            store: self.store.clone(),
             message,
             history,
-            delegate_tool,
-        )
+            delegate: delegate_tool,
+        })
         .await?;
 
         Ok(reply)
@@ -308,6 +345,17 @@ impl PersonaAgent {
 }
 
 // ── Agent construction helper ─────────────────────────────────────────────────
+
+struct BuildChatRequest<'a> {
+    client: &'a anthropic::Client,
+    model: &'a str,
+    preamble: &'a str,
+    active: Vec<ToolSpec>,
+    store: DataStore,
+    message: &'a str,
+    history: Vec<ChatMessage>,
+    delegate: Option<DelegateToPersona>,
+}
 
 /// Build an agent from the active tool set and run one chat turn.
 ///
@@ -317,23 +365,26 @@ impl PersonaAgent {
 ///
 /// When `delegate` is `Some`, a [`DelegateToPersona`] tool is added to the
 /// agent regardless of disclosure level, enabling sub-agent calls.
-async fn build_and_chat(
-    client: &anthropic::Client,
-    model: &str,
-    preamble: &str,
-    active: Vec<ToolSpec>,
-    store: DataStore,
-    message: &str,
-    history: Vec<ChatMessage>,
-    delegate: Option<DelegateToPersona>,
-) -> Result<String> {
-    let level = if active.contains(&ToolSpec::GetPortfolio) && active.contains(&ToolSpec::GetSignals) {
-        2 // full
-    } else if active.contains(&ToolSpec::GetSignals) || active.contains(&ToolSpec::QueryBars) {
-        1 // signals + market
-    } else {
-        0 // market only
-    };
+async fn build_and_chat(request: BuildChatRequest<'_>) -> Result<String> {
+    let BuildChatRequest {
+        client,
+        model,
+        preamble,
+        active,
+        store,
+        message,
+        history,
+        delegate,
+    } = request;
+
+    let level =
+        if active.contains(&ToolSpec::GetPortfolio) && active.contains(&ToolSpec::GetSignals) {
+            2 // full
+        } else if active.contains(&ToolSpec::GetSignals) || active.contains(&ToolSpec::QueryBars) {
+            1 // signals + market
+        } else {
+            0 // market only
+        };
 
     let mut rig_history: Vec<Message> = history
         .into_iter()
@@ -358,91 +409,111 @@ async fn build_and_chat(
     // rig agents are monomorphic over their tool set, so we must branch on
     // both level and whether a delegate tool is present.
     let reply = match (level, delegate) {
-        (0, None) => {
-            client
-                .agent(model)
-                .preamble(preamble)
-                .tool(GetInstrumentTool { store: store.clone() })
-                .tool(GetMacroContextTool { store })
-                .max_tokens(4096)
-                .build()
-                .chat(prompt, &mut rig_history)
-                .await
-                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?
-        }
-        (0, Some(dt)) => {
-            client
-                .agent(model)
-                .preamble(preamble)
-                .tool(GetInstrumentTool { store: store.clone() })
-                .tool(GetMacroContextTool { store })
-                .tool(dt)
-                .max_tokens(4096)
-                .build()
-                .chat(prompt, &mut rig_history)
-                .await
-                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?
-        }
-        (1, None) => {
-            client
-                .agent(model)
-                .preamble(preamble)
-                .tool(GetInstrumentTool { store: store.clone() })
-                .tool(GetMacroContextTool { store: store.clone() })
-                .tool(GetSignalsTool { store: store.clone() })
-                .tool(QueryBarsTool { store })
-                .max_tokens(4096)
-                .build()
-                .chat(prompt, &mut rig_history)
-                .await
-                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?
-        }
-        (1, Some(dt)) => {
-            client
-                .agent(model)
-                .preamble(preamble)
-                .tool(GetInstrumentTool { store: store.clone() })
-                .tool(GetMacroContextTool { store: store.clone() })
-                .tool(GetSignalsTool { store: store.clone() })
-                .tool(QueryBarsTool { store })
-                .tool(dt)
-                .max_tokens(4096)
-                .build()
-                .chat(prompt, &mut rig_history)
-                .await
-                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?
-        }
-        (_, None) => {
-            client
-                .agent(model)
-                .preamble(preamble)
-                .tool(GetInstrumentTool { store: store.clone() })
-                .tool(GetMacroContextTool { store: store.clone() })
-                .tool(GetSignalsTool { store: store.clone() })
-                .tool(QueryBarsTool { store: store.clone() })
-                .tool(GetPortfolioTool { store })
-                .max_tokens(4096)
-                .build()
-                .chat(prompt, &mut rig_history)
-                .await
-                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?
-        }
-        (_, Some(dt)) => {
-            client
-                .agent(model)
-                .preamble(preamble)
-                .tool(GetInstrumentTool { store: store.clone() })
-                .tool(GetMacroContextTool { store: store.clone() })
-                .tool(GetSignalsTool { store: store.clone() })
-                .tool(QueryBarsTool { store: store.clone() })
-                .tool(GetPortfolioTool { store })
-                .tool(dt)
-                .max_tokens(4096)
-                .build()
-                .chat(prompt, &mut rig_history)
-                .await
-                .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?
-        }
+        (0, None) => client
+            .agent(model)
+            .preamble(preamble)
+            .tool(GetInstrumentTool {
+                store: store.clone(),
+            })
+            .tool(GetMacroContextTool { store })
+            .max_tokens(4096)
+            .build()
+            .chat(prompt, &mut rig_history)
+            .await
+            .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+        (0, Some(dt)) => client
+            .agent(model)
+            .preamble(preamble)
+            .tool(GetInstrumentTool {
+                store: store.clone(),
+            })
+            .tool(GetMacroContextTool { store })
+            .tool(dt)
+            .max_tokens(4096)
+            .build()
+            .chat(prompt, &mut rig_history)
+            .await
+            .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+        (1, None) => client
+            .agent(model)
+            .preamble(preamble)
+            .tool(GetInstrumentTool {
+                store: store.clone(),
+            })
+            .tool(GetMacroContextTool {
+                store: store.clone(),
+            })
+            .tool(GetSignalsTool {
+                store: store.clone(),
+            })
+            .tool(QueryBarsTool { store })
+            .max_tokens(4096)
+            .build()
+            .chat(prompt, &mut rig_history)
+            .await
+            .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+        (1, Some(dt)) => client
+            .agent(model)
+            .preamble(preamble)
+            .tool(GetInstrumentTool {
+                store: store.clone(),
+            })
+            .tool(GetMacroContextTool {
+                store: store.clone(),
+            })
+            .tool(GetSignalsTool {
+                store: store.clone(),
+            })
+            .tool(QueryBarsTool { store })
+            .tool(dt)
+            .max_tokens(4096)
+            .build()
+            .chat(prompt, &mut rig_history)
+            .await
+            .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+        (_, None) => client
+            .agent(model)
+            .preamble(preamble)
+            .tool(GetInstrumentTool {
+                store: store.clone(),
+            })
+            .tool(GetMacroContextTool {
+                store: store.clone(),
+            })
+            .tool(GetSignalsTool {
+                store: store.clone(),
+            })
+            .tool(QueryBarsTool {
+                store: store.clone(),
+            })
+            .tool(GetPortfolioTool { store })
+            .max_tokens(4096)
+            .build()
+            .chat(prompt, &mut rig_history)
+            .await
+            .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
+        (_, Some(dt)) => client
+            .agent(model)
+            .preamble(preamble)
+            .tool(GetInstrumentTool {
+                store: store.clone(),
+            })
+            .tool(GetMacroContextTool {
+                store: store.clone(),
+            })
+            .tool(GetSignalsTool {
+                store: store.clone(),
+            })
+            .tool(QueryBarsTool {
+                store: store.clone(),
+            })
+            .tool(GetPortfolioTool { store })
+            .tool(dt)
+            .max_tokens(4096)
+            .build()
+            .chat(prompt, &mut rig_history)
+            .await
+            .map_err(|e| anyhow::anyhow!("Agent error: {e}"))?,
     };
 
     Ok(reply)
@@ -455,8 +526,12 @@ async fn build_and_chat(
 pub struct MarketObserverPersona;
 
 impl Persona for MarketObserverPersona {
-    fn id(&self) -> &str { "market_observer" }
-    fn name(&self) -> &str { "Market Observer" }
+    fn id(&self) -> &str {
+        "market_observer"
+    }
+    fn name(&self) -> &str {
+        "Market Observer"
+    }
     fn description(&self) -> &str {
         "Monitors market conditions and macro indicators. \
          Focused on context, not trade decisions."
@@ -493,8 +568,12 @@ impl Persona for MarketObserverPersona {
 pub struct QuantAnalystPersona;
 
 impl Persona for QuantAnalystPersona {
-    fn id(&self) -> &str { "quant_analyst" }
-    fn name(&self) -> &str { "Quant Analyst" }
+    fn id(&self) -> &str {
+        "quant_analyst"
+    }
+    fn name(&self) -> &str {
+        "Quant Analyst"
+    }
     fn description(&self) -> &str {
         "Analyses trade signals, strategies, and price behaviour. \
          Answers quantitative questions about the platform's signal output."
@@ -532,8 +611,12 @@ impl Persona for QuantAnalystPersona {
 pub struct PortfolioManagerPersona;
 
 impl Persona for PortfolioManagerPersona {
-    fn id(&self) -> &str { "portfolio_manager" }
-    fn name(&self) -> &str { "Portfolio Manager" }
+    fn id(&self) -> &str {
+        "portfolio_manager"
+    }
+    fn name(&self) -> &str {
+        "Portfolio Manager"
+    }
     fn description(&self) -> &str {
         "Manages portfolio state, risk metrics, drawdown, and position sizing."
     }
@@ -574,8 +657,12 @@ impl Persona for PortfolioManagerPersona {
 pub struct DataExplorerPersona;
 
 impl Persona for DataExplorerPersona {
-    fn id(&self) -> &str { "data_explorer" }
-    fn name(&self) -> &str { "Data Explorer" }
+    fn id(&self) -> &str {
+        "data_explorer"
+    }
+    fn name(&self) -> &str {
+        "Data Explorer"
+    }
     fn description(&self) -> &str {
         "Explores historical price data, data coverage, and time-series patterns."
     }
@@ -618,6 +705,7 @@ impl Persona for DataExplorerPersona {
 ///   "id": "sector_analyst",
 ///   "name": "Sector Analyst",
 ///   "description": "Focuses on sector rotation and relative strength.",
+///   "visible": true,
 ///   "preamble": "You are a sector analyst...",
 ///   "tool_levels": [
 ///     { "min_level": 0, "label": "Basic data",  "tools": ["get_instrument", "get_macro_context"] },
@@ -634,6 +722,8 @@ pub struct FilePersona {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[serde(default = "default_visible")]
+    pub visible: bool,
     pub preamble: String,
     pub tool_levels: Vec<ToolLevel>,
     #[serde(default)]
@@ -654,8 +744,15 @@ pub struct EscalationConfig {
     pub level_2_after_turns: usize,
 }
 
-fn default_level1_turns() -> usize { 3 }
-fn default_level2_turns() -> usize { 8 }
+fn default_level1_turns() -> usize {
+    3
+}
+fn default_level2_turns() -> usize {
+    8
+}
+fn default_visible() -> bool {
+    true
+}
 
 impl Default for EscalationConfig {
     fn default() -> Self {
@@ -667,12 +764,27 @@ impl Default for EscalationConfig {
 }
 
 impl Persona for FilePersona {
-    fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { &self.name }
-    fn description(&self) -> &str { &self.description }
-    fn preamble(&self) -> String { self.preamble.clone() }
-    fn tool_levels(&self) -> Vec<ToolLevel> { self.tool_levels.clone() }
-    fn delegates(&self) -> Vec<String> { self.delegates.clone() }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn visible(&self) -> bool {
+        self.visible
+    }
+    fn preamble(&self) -> String {
+        self.preamble.clone()
+    }
+    fn tool_levels(&self) -> Vec<ToolLevel> {
+        self.tool_levels.clone()
+    }
+    fn delegates(&self) -> Vec<String> {
+        self.delegates.clone()
+    }
 
     fn resolve_level(&self, ctx: &DisclosureContext) -> DisclosureLevel {
         match ctx.requested_depth {
@@ -727,10 +839,7 @@ impl PersonaRegistry {
     ///
     /// Returns `(loaded, errors)` — errors are non-fatal so the caller can
     /// log them without aborting the whole scan.
-    pub fn load_dir(
-        &self,
-        dir: impl AsRef<std::path::Path>,
-    ) -> (Vec<String>, Vec<anyhow::Error>) {
+    pub fn load_dir(&self, dir: impl AsRef<std::path::Path>) -> (Vec<String>, Vec<anyhow::Error>) {
         let dir = dir.as_ref();
         let mut loaded = Vec::new();
         let mut errors = Vec::new();
@@ -738,7 +847,10 @@ impl PersonaRegistry {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(e) => {
-                errors.push(anyhow::anyhow!("Cannot read persona dir {}: {e}", dir.display()));
+                errors.push(anyhow::anyhow!(
+                    "Cannot read persona dir {}: {e}",
+                    dir.display()
+                ));
                 return (loaded, errors);
             }
         };
@@ -786,7 +898,12 @@ impl DelegateToPersona {
         client: anthropic::Client,
         model: impl Into<String>,
     ) -> Self {
-        Self { registry, store, client, model: model.into() }
+        Self {
+            registry,
+            store,
+            client,
+            model: model.into(),
+        }
     }
 }
 
@@ -811,7 +928,7 @@ impl Tool for DelegateToPersona {
             .registry
             .list()
             .into_iter()
-            .map(|(id, desc)| format!("- `{id}`: {desc}"))
+            .map(|(id, _name, desc)| format!("- `{id}`: {desc}"))
             .collect::<Vec<_>>()
             .join("\n");
 

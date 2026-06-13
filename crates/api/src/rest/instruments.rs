@@ -28,7 +28,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/instruments", get(list_instruments).post(add_instrument))
         .route(
-            "/instruments/:symbol",
+            "/instruments/{symbol}",
             get(get_instrument).delete(remove_instrument),
         )
 }

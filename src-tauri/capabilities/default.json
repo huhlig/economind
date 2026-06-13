@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Economind desktop app capabilities",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*"]
+  },
+  "permissions": []
+}

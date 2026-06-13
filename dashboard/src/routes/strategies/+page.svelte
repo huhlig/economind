@@ -97,7 +97,7 @@
 
           <!-- Universe -->
           <div class="flex flex-wrap gap-1.5 mb-3">
-            {#each cfg.universe as sym}
+            {#each cfg.universe ?? [] as sym}
               <span class="text-xs px-2 py-0.5 rounded" style="background: var(--color-bg-secondary); color: var(--color-text-secondary)">
                 {sym}
               </span>

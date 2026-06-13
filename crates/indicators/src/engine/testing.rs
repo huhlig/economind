@@ -98,7 +98,7 @@ pub fn backtest_patterns(
 mod tests {
     use super::*;
     use crate::engine::EngineConfig;
-    use chrono::NaiveDateTime;
+    use chrono::{DateTime, NaiveDateTime};
     use economind_core::model::{CandleEntry, PatternDetection, PatternType};
     use rust_decimal::Decimal;
     use std::str::FromStr;
@@ -108,7 +108,9 @@ mod tests {
     }
 
     fn ts(secs: i64) -> NaiveDateTime {
-        NaiveDateTime::from_timestamp_opt(86400 * secs, 0).unwrap()
+        DateTime::from_timestamp(86400 * secs, 0)
+            .unwrap()
+            .naive_utc()
     }
 
     fn candle(secs: i64, close: &str) -> CandleEntry {

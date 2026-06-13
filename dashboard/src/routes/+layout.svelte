@@ -4,6 +4,7 @@
   import { isAuthenticated, apiKey } from '$lib/stores/auth.js';
   import { eventLog } from '$lib/stores/events.js';
   import { getWsClient } from '$lib/ws.js';
+  import AgentChat from '$lib/AgentChat.svelte';
   import { onMount } from 'svelte';
 
   let { children } = $props();
@@ -38,7 +39,7 @@
         <div class="text-2xl font-bold" style="color: var(--color-text-primary)">Economind</div>
         <div class="text-sm mt-1" style="color: var(--color-text-muted)">Low Frequency Trading Platform</div>
       </div>
-      <form onsubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); apiKey.login(fd.get('key')); }}>
+      <form onsubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); apiKey.login(String(fd.get('key') ?? '')); }}>
         <label class="block text-xs mb-1" style="color: var(--color-text-secondary)">API Key</label>
         <input
           type="password"
@@ -92,5 +93,6 @@
     <main class="flex-1 overflow-y-auto" style="background: var(--color-bg-primary)">
       {@render children()}
     </main>
+    <AgentChat />
   </div>
 {/if}

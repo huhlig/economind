@@ -2,10 +2,11 @@
 name = "economind-cli"
 version.workspace = true
 edition.workspace = true
+autobins = false
 
-[[bin]]
-name = "economind"
-path = "src/main.rs"
+[lib]
+name = "economind_cli"
+path = "src/lib.rs"
 
 [dependencies]
 economind-core     = { workspace = true }
@@ -15,6 +16,7 @@ economind-strategy = { workspace = true }
 economind-backtest = { workspace = true }
 economind-agentic  = { workspace = true }
 economind-config   = { workspace = true }
+economind-api      = { workspace = true }
 
 # Strategy plugins
 strategy-momentum       = { workspace = true }

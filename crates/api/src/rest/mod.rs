@@ -7,8 +7,10 @@
 mod backtest;
 mod chat;
 mod data;
+mod datafeed;
 mod instruments;
 mod positions;
+mod settings;
 mod signals;
 mod strategy;
 
@@ -22,8 +24,10 @@ pub fn router() -> Router<AppState> {
         .merge(instruments::router())
         .merge(signals::router())
         .merge(positions::router())
+        .merge(settings::router())
         .merge(strategy::router())
         .merge(backtest::router())
         .merge(chat::router())
         .merge(data::router())
+        .merge(datafeed::router())
 }

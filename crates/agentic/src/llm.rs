@@ -57,7 +57,8 @@ impl LlmClientConfig {
     pub fn from_env() -> Option<Box<dyn LlmClient>> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
         let local_url = std::env::var("LOCAL_LLM_BASE_URL").ok();
-        let local_model = std::env::var("LOCAL_LLM_MODEL").unwrap_or_else(|_| "llama3".to_string());
+        let local_model =
+            std::env::var("LOCAL_LLM_MODEL").unwrap_or_else(|_| LOCAL_DEFAULT_MODEL.to_string());
         let force_provider =
             std::env::var("LLM_PROVIDER")
                 .ok()
