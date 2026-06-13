@@ -28,7 +28,7 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/strategy/configs", get(list_configs))
+        .route("/strategy/configs", get(list_configs).post(create_config))
         .route("/strategy/configs/{id}", get(get_config).put(update_config))
         .route("/strategy/run", post(trigger_run))
 }
@@ -47,6 +47,26 @@ pub struct StrategyConfigResponse {
     pub version: u32,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateConfigRequest {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default = "default_composition")]
+    pub composition: String,
+    pub plugins: Option<serde_json::Value>,
+    pub parameters: Option<HashMap<String, String>>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_composition() -> String {
+    "pipeline".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +112,52 @@ fn row_to_response(row: StrategyConfigRow) -> ApiResult<StrategyConfigResponse> 
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
+
+/// `POST /api/v1/strategy/configs`
+async fn create_config(
+    State(state): State<AppState>,
+    Json(req): Json<CreateConfigRequest>,
+) -> ApiResult<Json<StrategyConfigResponse>> {
+    let plugins_json = req
+        .plugins
+        .as_ref()
+        .map(|p| serde_json::to_string(p))
+        .transpose()
+        .map_err(|e| ApiError::Internal(format!("plugins JSON: {e}")))?
+        .unwrap_or_else(|| "[]".to_string());
+
+    let parameters_json = req
+        .parameters
+        .as_ref()
+        .map(|p| serde_json::to_string(p))
+        .transpose()
+        .map_err(|e| ApiError::Internal(format!("parameters JSON: {e}")))?
+        .unwrap_or_else(|| "{}".to_string());
+
+    let now = Utc::now();
+    let row = economind_db::StrategyConfigRow {
+        id: Uuid::new_v4(),
+        name: req.name,
+        description: req.description,
+        composition: req.composition,
+        plugins_json,
+        parameters_json,
+        enabled: req.enabled,
+        auto_execute: false,
+        execution_mode: "signal_only".to_string(),
+        version: 1,
+        created_at: now,
+        updated_at: now,
+    };
+
+    state
+        .store()
+        .insert_strategy_config(&row)
+        .await
+        .map_err(ApiError::Storage)?;
+
+    Ok(Json(row_to_response(row)?))
+}
 
 /// `GET /api/v1/strategy/configs`
 async fn list_configs(

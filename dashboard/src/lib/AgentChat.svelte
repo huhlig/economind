@@ -2,6 +2,7 @@
   import { tick, onMount } from 'svelte';
   import { chat } from '$lib/api.js';
   import type { ChatMessage, ChatPersona, ChatSession } from '$lib/api.js';
+  import { pageContext } from '$lib/stores/pageContext.js';
 
   let draft = $state('');
   let history = $state<ChatMessage[]>([]);
@@ -59,9 +60,14 @@
     loading = true;
     await scrollToLatest();
 
+    // Prepend page context to the first message of a new conversation
+    const ctx = $pageContext;
+    const isFirstTurn = history.length === 1 && !sessionId;
+    const enrichedMessage = ctx && isFirstTurn ? `${ctx}\n\nUser question: ${message}` : message;
+
     try {
       const response = await chat.send({
-        message,
+        message: enrichedMessage,
         history: history.slice(0, -1),
         session_id: sessionId || undefined,
         persona_id: personaId || undefined,

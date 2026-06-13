@@ -1,11 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { portfolio } from '$lib/api.js';
+  import { portfolio, data as dataApi } from '$lib/api.js';
   import type { PortfolioSummary, WatchItem } from '$lib/api.js';
   import { eventLog } from '$lib/stores/events.js';
 
+  interface WatchItemEnriched extends WatchItem {
+    last_price?: number;
+    price_change?: number;
+    price_change_pct?: number;
+    volume?: number;
+  }
+
   let data = $state<PortfolioSummary | null>(null);
-  let watches = $state<WatchItem[]>([]);
+  let watches = $state<WatchItemEnriched[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
 
@@ -36,6 +43,25 @@
       const [summary, ws] = await Promise.all([portfolio.summary(), portfolio.listWatches()]);
       data = summary;
       watches = ws;
+      // Enrich watches with latest bar data (fire-and-forget per symbol)
+      const to = new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.now() - 10 * 86400_000).toISOString().slice(0, 10);
+      ws.forEach(async (w) => {
+        try {
+          const bars = await dataApi.bars(w.symbol, from, to);
+          if (bars.length >= 1) {
+            const last = bars[bars.length - 1];
+            const prev = bars.length >= 2 ? bars[bars.length - 2] : null;
+            const change = prev ? last.close - prev.close : undefined;
+            const changePct = prev && prev.close ? change! / prev.close : undefined;
+            watches = watches.map(x =>
+              x.symbol === w.symbol
+                ? { ...x, last_price: last.close, price_change: change, price_change_pct: changePct, volume: last.volume }
+                : x
+            );
+          }
+        } catch { /* no bar data available */ }
+      });
     } catch (e) {
       error = String(e);
     } finally {
@@ -83,9 +109,9 @@
     buyLoading = true;
     try {
       await portfolio.buy({
-        symbol: buySymbol.trim().toUpperCase(),
-        shares: buyShares.trim(),
-        entry_price: buyPrice.trim(),
+        symbol: String(buySymbol).trim().toUpperCase(),
+        shares: String(buyShares).trim(),
+        entry_price: String(buyPrice).trim(),
         entry_at: buyDate ? new Date(buyDate).toISOString() : undefined,
       });
       showBuy = false;
@@ -102,7 +128,7 @@
     sellLoading = true;
     try {
       await portfolio.sell(sellPositionId, {
-        exit_price: sellPrice.trim(),
+        exit_price: String(sellPrice).trim(),
         exit_at: sellDate ? new Date(sellDate).toISOString() : undefined,
       });
       showSell = false;
@@ -122,6 +148,23 @@
       const item = await portfolio.addWatch(sym);
       watches = [item, ...watches.filter(w => w.symbol !== sym)];
       watchSymbol = '';
+      // Enrich the newly added symbol
+      const to = new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.now() - 10 * 86400_000).toISOString().slice(0, 10);
+      try {
+        const bars = await dataApi.bars(sym, from, to);
+        if (bars.length >= 1) {
+          const last = bars[bars.length - 1];
+          const prev = bars.length >= 2 ? bars[bars.length - 2] : null;
+          const change = prev ? last.close - prev.close : undefined;
+          const changePct = prev && prev.close ? change! / prev.close : undefined;
+          watches = watches.map(x =>
+            x.symbol === sym
+              ? { ...x, last_price: last.close, price_change: change, price_change_pct: changePct, volume: last.volume }
+              : x
+          );
+        }
+      } catch { /* no bar data */ }
     } catch (e) {
       watchError = String(e);
     }
@@ -254,6 +297,9 @@
           <thead>
             <tr style="border-bottom: 1px solid var(--color-border)">
               <th class="text-left px-4 py-3 text-xs font-medium" style="color: var(--color-text-muted)">Symbol</th>
+              <th class="text-right px-4 py-3 text-xs font-medium" style="color: var(--color-text-muted)">Last Price</th>
+              <th class="text-right px-4 py-3 text-xs font-medium" style="color: var(--color-text-muted)">Change</th>
+              <th class="text-right px-4 py-3 text-xs font-medium" style="color: var(--color-text-muted)">Volume</th>
               <th class="text-right px-4 py-3 text-xs font-medium" style="color: var(--color-text-muted)">Added</th>
               <th class="px-4 py-3 text-xs font-medium" style="color: var(--color-text-muted)"></th>
             </tr>
@@ -262,6 +308,19 @@
             {#each watches as w}
               <tr style="border-top: 1px solid var(--color-border)">
                 <td class="px-4 py-2.5 font-medium" style="color: var(--color-text-primary)">{w.symbol}</td>
+                <td class="px-4 py-2.5 text-right" style="color: var(--color-text-secondary)">
+                  {w.last_price != null ? '$' + fmt(w.last_price) : '—'}
+                </td>
+                <td class="px-4 py-2.5 text-right font-medium" style="color: {w.price_change != null ? (w.price_change >= 0 ? 'var(--color-accent-green)' : 'var(--color-accent-red)') : 'var(--color-text-muted)'}">
+                  {#if w.price_change != null && w.price_change_pct != null}
+                    {w.price_change >= 0 ? '+' : ''}{fmt(w.price_change)} ({w.price_change >= 0 ? '+' : ''}{fmt(w.price_change_pct * 100)}%)
+                  {:else}
+                    —
+                  {/if}
+                </td>
+                <td class="px-4 py-2.5 text-right text-xs" style="color: var(--color-text-muted)">
+                  {w.volume != null ? w.volume.toLocaleString() : '—'}
+                </td>
                 <td class="px-4 py-2.5 text-right text-xs" style="color: var(--color-text-muted)">
                   {new Date(w.added_at).toLocaleDateString()}
                 </td>

@@ -3,6 +3,8 @@
   import { portfolio, signals, strategy, backtest } from '$lib/api.js';
   import type { PortfolioSummary, Signal, StrategyConfig, BacktestRun } from '$lib/api.js';
   import { eventLog } from '$lib/stores/events.js';
+  import { pageContext } from '$lib/stores/pageContext.js';
+  import { onDestroy } from 'svelte';
 
   let portfolioData = $state<PortfolioSummary | null>(null);
   let recentSignals = $state<Signal[]>([]);
@@ -24,6 +26,23 @@
     } finally {
       loading = false;
     }
+  });
+
+  $effect(() => {
+    if (portfolioData) {
+      pageContext.set(
+        `[Overview screen context]\n` +
+        `- Total Equity: $${fmt(portfolioData.total_equity)}\n` +
+        `- Cash: $${fmt(portfolioData.cash)}\n` +
+        `- Unrealized P&L: ${portfolioData.unrealized_pnl >= 0 ? '+' : ''}$${fmt(portfolioData.unrealized_pnl)}\n` +
+        `- Open Positions: ${portfolioData.positions.length}\n` +
+        `- Active Strategies: ${strategies.filter(s => s.enabled).length}\n` +
+        (portfolioData.positions.length > 0
+          ? `- Positions: ${portfolioData.positions.map(p => `${p.symbol} (${p.quantity} shares @ $${fmt(p.average_cost)})`).join(', ')}\n`
+          : '')
+      );
+    }
+    return () => pageContext.set('');
   });
 
   $effect(() => {

@@ -121,6 +121,22 @@
   function fmt(n: number, d = 2) {
     return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   }
+
+  function barStats(bs: Bar[]) {
+    if (bs.length === 0) return null;
+    const last = bs[bs.length - 1];
+    const prev = bs.length >= 2 ? bs[bs.length - 2] : null;
+    const change = prev ? last.close - prev.close : 0;
+    const changePct = prev && prev.close ? change / prev.close * 100 : 0;
+    const avgVol = Math.round(bs.reduce((s, b) => s + b.volume, 0) / bs.length);
+    const hi = Math.max(...bs.map(b => b.high));
+    const lo = Math.min(...bs.map(b => b.low));
+    return { last, change, changePct, avgVol, hi, lo };
+  }
+
+  $effect(() => {
+    if (selectedSymbol && !loading) loadBars();
+  });
 </script>
 
 <div class="p-6">
@@ -197,6 +213,26 @@
   {/if}
 
   {#if bars.length > 0}
+    <!-- Summary stats -->
+    {@const stats = barStats(bars)}
+    {#if stats}
+      <div class="grid grid-cols-6 gap-3 mb-5">
+        {#each [
+          { label: 'Last Close', value: '$' + fmt(stats.last.close) },
+          { label: 'Change', value: (stats.change >= 0 ? '+' : '') + fmt(stats.change) + ' (' + (stats.changePct >= 0 ? '+' : '') + fmt(stats.changePct) + '%)', color: stats.change >= 0 ? 'var(--color-accent-green)' : 'var(--color-accent-red)' },
+          { label: 'Range High', value: '$' + fmt(stats.hi), color: 'var(--color-accent-green)' },
+          { label: 'Range Low', value: '$' + fmt(stats.lo), color: 'var(--color-accent-red)' },
+          { label: 'Avg Volume', value: stats.avgVol.toLocaleString() },
+          { label: 'Bars', value: String(bars.length) },
+        ] as card}
+          <div class="rounded-xl p-3" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
+            <div class="text-xs mb-1" style="color: var(--color-text-muted)">{card.label}</div>
+            <div class="text-sm font-semibold" style="color: {card.color ?? 'var(--color-text-primary)'}">{card.value}</div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     <!-- Chart -->
     <div class="rounded-xl p-4 mb-5" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
       <div class="text-sm font-medium mb-3" style="color: var(--color-text-primary)">

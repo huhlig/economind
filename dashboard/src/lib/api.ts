@@ -430,9 +430,17 @@ export const portfolio = {
 
 // ── Strategy ───────────────────────────────────────────────────────────────────
 
+export interface CreateStrategyRequest {
+  name: string;
+  description?: string;
+  composition?: string;
+  enabled?: boolean;
+}
+
 export const strategy = {
   list: () => get<StrategyConfig[]>('/strategy/configs'),
   get: (id: string) => get<StrategyConfig>(`/strategy/configs/${id}`),
+  create: (req: CreateStrategyRequest) => post<StrategyConfig>('/strategy/configs', req),
   update: (id: string, body: Partial<StrategyConfig>) =>
     put<StrategyConfig>(`/strategy/configs/${id}`, body),
   run: (id: string) => post<StrategyRunResult>('/strategy/run', { config_id: id }),

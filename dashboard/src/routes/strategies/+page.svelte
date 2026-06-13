@@ -9,6 +9,13 @@
   let running = $state<Set<string>>(new Set());
   let runResults = $state<Record<string, StrategyRunResult>>({});
 
+  // ── Create modal ──────────────────────────────────────────────────────────────
+  let showCreate = $state(false);
+  let createName = $state('');
+  let createDescription = $state('');
+  let createError = $state<string | null>(null);
+  let createLoading = $state(false);
+
   onMount(async () => {
     try {
       configs = await strategy.list();
@@ -31,6 +38,31 @@
     }
   }
 
+  async function openCreate() {
+    createName = '';
+    createDescription = '';
+    createError = null;
+    showCreate = true;
+  }
+
+  async function submitCreate() {
+    createError = null;
+    createLoading = true;
+    try {
+      const newCfg = await strategy.create({
+        name: createName.trim(),
+        description: createDescription.trim() || undefined,
+        enabled: true,
+      });
+      configs = [newCfg, ...configs];
+      showCreate = false;
+    } catch (e) {
+      createError = String(e);
+    } finally {
+      createLoading = false;
+    }
+  }
+
   async function toggleEnabled(cfg: StrategyConfig) {
     try {
       const updated = await strategy.update(cfg.id, { enabled: !cfg.enabled });
@@ -42,7 +74,16 @@
 </script>
 
 <div class="p-6">
-  <h1 class="text-xl font-semibold mb-6" style="color: var(--color-text-primary)">Strategy Manager</h1>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-semibold" style="color: var(--color-text-primary)">Strategy Manager</h1>
+    <button
+      onclick={openCreate}
+      class="text-sm px-4 py-2 rounded-lg font-medium"
+      style="background: var(--color-accent-blue); color: white;"
+    >
+      + New Strategy
+    </button>
+  </div>
 
   {#if loading}
     <div style="color: var(--color-text-muted)">Loading…</div>
@@ -131,3 +172,55 @@
     </div>
   {/if}
 </div>
+
+<!-- Create Strategy Modal -->
+{#if showCreate}
+  <div
+    class="fixed inset-0 flex items-center justify-center z-50"
+    style="background: rgba(0,0,0,0.5)"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="rounded-xl p-6 w-full max-w-md" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
+      <h2 class="text-base font-semibold mb-4" style="color: var(--color-text-primary)">New Strategy</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs mb-1 block" style="color: var(--color-text-muted)">Name</label>
+          <input
+            type="text"
+            bind:value={createName}
+            placeholder="My Strategy"
+            class="w-full text-sm px-3 py-2 rounded-lg"
+            style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary);"
+          />
+        </div>
+        <div>
+          <label class="text-xs mb-1 block" style="color: var(--color-text-muted)">Description (optional)</label>
+          <textarea
+            bind:value={createDescription}
+            placeholder="Brief description of this strategy…"
+            rows="3"
+            class="w-full text-sm px-3 py-2 rounded-lg resize-none"
+            style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary);"
+          ></textarea>
+        </div>
+      </div>
+      {#if createError}
+        <div class="mt-3 text-xs" style="color: var(--color-accent-red)">{createError}</div>
+      {/if}
+      <div class="flex gap-3 mt-5">
+        <button
+          onclick={() => (showCreate = false)}
+          class="flex-1 text-sm py-2 rounded-lg"
+          style="border: 1px solid var(--color-border); color: var(--color-text-secondary);"
+        >Cancel</button>
+        <button
+          onclick={submitCreate}
+          disabled={createLoading || !createName.trim()}
+          class="flex-1 text-sm py-2 rounded-lg font-medium"
+          style="background: var(--color-accent-blue); color: white; opacity: {createLoading ? 0.6 : 1};"
+        >{createLoading ? 'Creating…' : 'Create'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
