@@ -396,11 +396,128 @@ async fn setting_or_env(
     Ok(std::env::var(env_key).unwrap_or_else(|_| default.to_string()))
 }
 
+// ── LLM Test ──────────────────────────────────────────────────────────────────
+
+async fn test_llm(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+    // Build a fresh agent from current DB settings so the test reflects what's
+    // configured right now, not just what was saved at last restart.
+    let agent = crate::state::build_chat_service(state.store())
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let Some(agent) = agent else {
+        return Ok(Json(serde_json::json!({
+            "ok": false,
+            "error": "No LLM backend configured — set provider and save, or check credentials"
+        })));
+    };
+
+    match agent.chat("Reply with exactly: OK", vec![]).await {
+        Ok(reply) => Ok(Json(serde_json::json!({
+            "ok": true,
+            "message": reply.chars().take(120).collect::<String>()
+        }))),
+        Err(e) => Ok(Json(serde_json::json!({
+            "ok": false,
+            "error": e.to_string()
+        }))),
+    }
+}
+
+// ── LLM Models ─────────────────────────────────────────────────────────────────
+
+const ANTHROPIC_MODELS: &[&str] = &[
+    "claude-haiku-4-5",
+    "claude-sonnet-4-6",
+    "claude-opus-4-8",
+];
+
+async fn list_llm_models(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+    let defaults = LlmConfig::default();
+    let provider = setting_or_env(&state, KEY_PROVIDER, "LLM_PROVIDER", &defaults.provider).await?;
+    let local_base_url = setting_or_env(&state, KEY_LOCAL_BASE_URL, "LOCAL_LLM_BASE_URL", &defaults.local_base_url).await?;
+
+    match provider.as_str() {
+        "anthropic" => Ok(Json(serde_json::json!({
+            "provider": "anthropic",
+            "models": ANTHROPIC_MODELS,
+        }))),
+        "local" => {
+            let models = fetch_local_models(&local_base_url).await;
+            Ok(Json(serde_json::json!({
+                "provider": "local",
+                "models": models,
+            })))
+        }
+        _ => {
+            // auto: return anthropic models (hardcoded) + local models if reachable
+            let local_models = if !local_base_url.is_empty() {
+                fetch_local_models(&local_base_url).await
+            } else {
+                vec![]
+            };
+            let anthropic_key_set = std::env::var("ANTHROPIC_API_KEY").map(|v| !v.trim().is_empty()).unwrap_or(false);
+            let models: Vec<serde_json::Value> = if anthropic_key_set {
+                ANTHROPIC_MODELS.iter().map(|m| serde_json::json!({"id": m, "provider": "anthropic"})).collect()
+            } else {
+                local_models.iter().map(|m| serde_json::json!({"id": m, "provider": "local"})).collect()
+            };
+            Ok(Json(serde_json::json!({
+                "provider": "auto",
+                "models": models,
+            })))
+        }
+    }
+}
+
+async fn fetch_local_models(base_url: &str) -> Vec<String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or_default();
+
+    let base = base_url.trim_end_matches('/');
+
+    // Try OpenAI-compatible /v1/models first
+    if let Ok(resp) = client.get(format!("{base}/v1/models")).send().await {
+        if let Ok(json) = resp.json::<serde_json::Value>().await {
+            if let Some(data) = json["data"].as_array() {
+                let models: Vec<String> = data
+                    .iter()
+                    .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                    .collect();
+                if !models.is_empty() {
+                    return models;
+                }
+            }
+        }
+    }
+
+    // Try Ollama /api/tags
+    if let Ok(resp) = client.get(format!("{base}/api/tags")).send().await {
+        if let Ok(json) = resp.json::<serde_json::Value>().await {
+            if let Some(models_arr) = json["models"].as_array() {
+                let models: Vec<String> = models_arr
+                    .iter()
+                    .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+                    .collect();
+                if !models.is_empty() {
+                    return models;
+                }
+            }
+        }
+    }
+
+    vec![]
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/settings/llm", get(get_llm_settings).put(update_llm_settings))
+        .route("/settings/llm/test", get(test_llm))
+        .route("/settings/llm/models", get(list_llm_models))
         .route("/settings/datafeed", get(get_datafeed_settings).put(update_datafeed_settings))
         .route("/settings/schedule", get(get_schedule_settings).put(update_schedule_settings))
         .route("/settings/risk", get(get_risk_settings).put(update_risk_settings))

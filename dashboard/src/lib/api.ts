@@ -230,6 +230,11 @@ export interface LlmSettings {
   source: string;
 }
 
+export interface LlmModels {
+  provider: string;
+  models: string[] | Array<{ id: string; provider: string }>;
+}
+
 export interface DatafeedSettings {
   bar_concurrency: number;
   bar_backfill_days: number;
@@ -344,8 +349,40 @@ export const signals = {
 
 // ── Portfolio ──────────────────────────────────────────────────────────────────
 
+interface BackendPortfolioSummary {
+  portfolio_value: string;
+  available_cash: string;
+  current_drawdown: string;
+  open_positions: Array<{
+    id: string;
+    symbol: string;
+    shares: string;
+    entry_price: string;
+    entry_at: string;
+  }>;
+}
+
+function toPortfolioSummary(raw: BackendPortfolioSummary): PortfolioSummary {
+  const equity = toNumber(raw.portfolio_value) ?? 0;
+  const cash = toNumber(raw.available_cash) ?? 0;
+  const invested = equity - cash;
+  return {
+    total_equity: equity,
+    cash,
+    unrealized_pnl: 0,
+    positions: raw.open_positions.map(p => ({
+      symbol: p.symbol,
+      quantity: toNumber(p.shares) ?? 0,
+      average_cost: toNumber(p.entry_price) ?? 0,
+      side: 'Long' as const,
+      current_price: undefined,
+      unrealized_pnl: undefined,
+    })),
+  };
+}
+
 export const portfolio = {
-  summary: () => get<PortfolioSummary>('/positions'),
+  summary: () => get<BackendPortfolioSummary>('/positions').then(toPortfolioSummary),
 };
 
 // ── Strategy ───────────────────────────────────────────────────────────────────
@@ -404,6 +441,8 @@ export const settings = {
   llm: () => get<LlmSettings>('/settings/llm'),
   updateLlm: (req: Pick<LlmSettings, 'provider' | 'anthropic_model' | 'local_base_url' | 'local_model'>) =>
     put<LlmSettings>('/settings/llm', req),
+  llmModels: () => get<LlmModels>('/settings/llm/models'),
+  testLlm: () => get<{ ok: boolean; message?: string; error?: string }>('/settings/llm/test'),
   datafeed: () => get<DatafeedSettings>('/settings/datafeed'),
   updateDatafeed: (req: Pick<DatafeedSettings, 'bar_concurrency' | 'bar_backfill_days' | 'fred_series'>) =>
     put<DatafeedSettings>('/settings/datafeed', req),

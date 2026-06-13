@@ -85,11 +85,11 @@ async fn chat_handler(
     State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
-    let Some(svc) = state.chat_service().await else {
+    let Some(svc) = state.chat_agent().await else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
-                "error": "Chat agent not configured — set ANTHROPIC_API_KEY to enable"
+                "error": "Chat agent not configured — configure an LLM provider in Settings"
             })),
         )
             .into_response();
@@ -268,11 +268,11 @@ async fn get_session_handler(
 }
 
 async fn list_personas_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let Some(svc) = state.chat_service().await else {
+    let Some(svc) = state.chat_agent().await else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
-                "error": "Chat agent not configured — set ANTHROPIC_API_KEY to enable"
+                "error": "Chat agent not configured — configure an LLM provider in Settings"
             })),
         )
             .into_response();
@@ -298,7 +298,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/chat", post(chat_handler))
         .route("/chat/sessions", get(list_sessions_handler))
-        .route("/chat/sessions/:id", get(get_session_handler))
+        .route("/chat/sessions/{id}", get(get_session_handler))
         .route("/chat/personas", get(list_personas_handler))
 }
 

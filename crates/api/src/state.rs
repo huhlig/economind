@@ -5,7 +5,8 @@
 //! Shared application state injected into every handler via Axum extractors.
 
 use crate::events::EventBus;
-use economind_agentic::ChatService;
+use economind_agentic::{ChatAgent, ChatService, LocalChatAgent};
+use economind_config::LlmConfig;
 use economind_db::DataStore;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -23,8 +24,8 @@ struct Inner {
     pub store: DataStore,
     pub api_key: String,
     pub event_bus: EventBus,
-    /// Present when `ANTHROPIC_API_KEY` is set at startup.
-    pub chat_service: RwLock<Option<ChatService>>,
+    /// Present when an LLM backend is configured.
+    pub chat_agent: RwLock<Option<Arc<dyn ChatAgent>>>,
 }
 
 impl AppState {
@@ -42,7 +43,7 @@ impl AppState {
                 store,
                 api_key,
                 event_bus,
-                chat_service: RwLock::new(chat_service),
+                chat_agent: RwLock::new(chat_service),
             }),
         })
     }
@@ -59,26 +60,86 @@ impl AppState {
         &self.inner.event_bus
     }
 
-    /// Returns the chat agent, or `None` if `ANTHROPIC_API_KEY` was not set.
-    pub async fn chat_service(&self) -> Option<ChatService> {
-        self.inner.chat_service.read().await.clone()
+    /// Returns the chat agent, or `None` if no LLM backend is configured.
+    pub async fn chat_agent(&self) -> Option<Arc<dyn ChatAgent>> {
+        self.inner.chat_agent.read().await.clone()
     }
 
     /// Rebuild the chat agent from persisted LLM settings and environment secrets.
     pub async fn reload_chat_service(&self) -> anyhow::Result<()> {
-        let chat_service = build_chat_service(&self.inner.store).await?;
-        *self.inner.chat_service.write().await = chat_service;
+        let agent = build_chat_service(&self.inner.store).await?;
+        *self.inner.chat_agent.write().await = agent;
         Ok(())
     }
 }
 
-async fn build_chat_service(store: &DataStore) -> anyhow::Result<Option<ChatService>> {
-    let model = store
+pub async fn build_chat_service(
+    store: &DataStore,
+) -> anyhow::Result<Option<Arc<dyn ChatAgent>>> {
+    let d = LlmConfig::default();
+
+    let provider = store
+        .get_setting("llm.provider")
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("LLM_PROVIDER").ok())
+        .unwrap_or(d.provider);
+
+    let anthropic_model = store
         .get_setting("llm.anthropic_model")
         .await
-        .map_err(|e| anyhow::anyhow!("LLM settings load failed: {e}"))?
+        .ok()
+        .flatten()
         .or_else(|| std::env::var("AGENT_MODEL").ok())
-        .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
+        .unwrap_or(d.anthropic_model);
 
-    Ok(ChatService::from_env_with_model(store.clone(), model))
+    let local_base_url = store
+        .get_setting("llm.local_base_url")
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("LOCAL_LLM_BASE_URL").ok())
+        .unwrap_or(d.local_base_url);
+
+    let local_model = store
+        .get_setting("llm.local_model")
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("LOCAL_LLM_MODEL").ok())
+        .unwrap_or(d.local_model);
+
+    match provider.to_lowercase().as_str() {
+        "local" => {
+            if local_base_url.is_empty() {
+                tracing::warn!("LLM provider=local but LOCAL_LLM_BASE_URL is not configured");
+                return Ok(None);
+            }
+            tracing::info!("LLM backend: local at {local_base_url} model={local_model}");
+            Ok(Some(Arc::new(LocalChatAgent::new(local_base_url, local_model))))
+        }
+        "anthropic" => {
+            match ChatService::from_env_with_model(store.clone(), anthropic_model) {
+                Some(svc) => Ok(Some(Arc::new(svc))),
+                None => {
+                    tracing::warn!("LLM provider=anthropic but ANTHROPIC_API_KEY is not set");
+                    Ok(None)
+                }
+            }
+        }
+        _ => {
+            // auto: try Anthropic first, fall back to local
+            if let Some(svc) = ChatService::from_env_with_model(store.clone(), anthropic_model) {
+                tracing::info!("LLM backend: Anthropic (auto)");
+                return Ok(Some(Arc::new(svc)));
+            }
+            if !local_base_url.is_empty() {
+                tracing::info!("LLM backend: local (auto fallback) at {local_base_url}");
+                return Ok(Some(Arc::new(LocalChatAgent::new(local_base_url, local_model))));
+            }
+            tracing::debug!("No LLM backend configured — chat disabled");
+            Ok(None)
+        }
+    }
 }

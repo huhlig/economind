@@ -22,10 +22,12 @@
   let llmSaving = $state(false);
   let llmSaved = $state(false);
   let llmError = $state<string | null>(null);
+  let llmModelsLoading = $state(false);
+  let availableModels = $state<string[]>([]);
   let llm = $state<LlmSettings>({
     provider: 'auto',
     anthropic_model: 'claude-haiku-4-5',
-    local_base_url: 'http://localhost:11434/v1',
+    local_base_url: 'http://localhost:11434',
     local_model: 'llama3',
     anthropic_api_key_configured: false,
     source: 'default',
@@ -33,9 +35,39 @@
 
   async function loadLlmSettings() {
     llmLoading = true; llmError = null;
-    try { llm = await settings.llm(); }
+    try {
+      llm = await settings.llm();
+      await refreshModels();
+    }
     catch (e) { llmError = readableError(e); }
     finally { llmLoading = false; }
+  }
+
+  async function refreshModels() {
+    llmModelsLoading = true;
+    try {
+      const result = await settings.llmModels();
+      if (Array.isArray(result.models) && result.models.length > 0) {
+        if (typeof result.models[0] === 'string') {
+          availableModels = result.models as string[];
+        } else {
+          availableModels = (result.models as Array<{ id: string; provider: string }>).map(m => m.id);
+        }
+      } else {
+        availableModels = [];
+      }
+    } catch { availableModels = []; }
+    finally { llmModelsLoading = false; }
+  }
+
+  let llmTesting = $state(false);
+  let llmTestResult = $state<{ ok: boolean; message?: string; error?: string } | null>(null);
+
+  async function testLlmConnection() {
+    llmTesting = true; llmTestResult = null;
+    try { llmTestResult = await settings.testLlm(); }
+    catch (e) { llmTestResult = { ok: false, error: readableError(e) }; }
+    finally { llmTesting = false; }
   }
 
   async function saveLlmSettings() {
@@ -47,10 +79,20 @@
         local_base_url: llm.local_base_url,
         local_model: llm.local_model,
       });
+      await refreshModels();
       llmSaved = true;
       setTimeout(() => (llmSaved = false), 2000);
     } catch (e) { llmError = readableError(e); }
     finally { llmSaving = false; }
+  }
+
+  // Derived: the currently-relevant model value and setter
+  function currentModel(): string {
+    return llm.provider === 'local' ? llm.local_model : llm.anthropic_model;
+  }
+  function setCurrentModel(v: string) {
+    if (llm.provider === 'local') llm.local_model = v;
+    else llm.anthropic_model = v;
   }
 
   // ── Datafeed ───────────────────────────────────────────────────────────────
@@ -240,10 +282,12 @@
   <div class="rounded-xl p-5 space-y-4" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
     <div class="flex items-center justify-between gap-4">
       <h2 class="text-sm font-medium" style="color: var(--color-text-primary)">LLM</h2>
-      <span class="rounded px-2 py-1 text-xs"
-        style="background: var(--color-bg-secondary); color: {llm.anthropic_api_key_configured ? 'var(--color-accent-green)' : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);">
-        Anthropic key {llm.anthropic_api_key_configured ? 'configured' : 'missing'}
-      </span>
+      {#if llm.provider !== 'local'}
+        <span class="rounded px-2 py-1 text-xs"
+          style="background: var(--color-bg-secondary); color: {llm.anthropic_api_key_configured ? 'var(--color-accent-green)' : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);">
+          Anthropic key {llm.anthropic_api_key_configured ? 'configured' : 'missing'}
+        </span>
+      {/if}
     </div>
     {#if llmLoading}
       <div class="text-sm" style="color: var(--color-text-muted)">Loading...</div>
@@ -251,7 +295,9 @@
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label for="llm-provider" class="block text-xs mb-1" style="color: var(--color-text-secondary)">Provider</label>
-          <select id="llm-provider" bind:value={llm.provider} class="w-full rounded-lg px-3 py-2 text-sm"
+          <select id="llm-provider" bind:value={llm.provider}
+            onchange={() => { availableModels = []; refreshModels(); }}
+            class="w-full rounded-lg px-3 py-2 text-sm"
             style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); outline: none;">
             <option value="auto">Auto</option>
             <option value="anthropic">Anthropic</option>
@@ -259,26 +305,62 @@
           </select>
         </div>
         <div>
-          <label for="anthropic-model" class="block text-xs mb-1" style="color: var(--color-text-secondary)">Anthropic model</label>
-          <input id="anthropic-model" type="text" bind:value={llm.anthropic_model} class="w-full rounded-lg px-3 py-2 text-sm"
-            style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); outline: none;" />
+          <div class="flex items-center justify-between mb-1">
+            <label for="llm-model" class="text-xs" style="color: var(--color-text-secondary)">Model</label>
+            <button onclick={refreshModels} disabled={llmModelsLoading}
+              class="text-xs px-2 py-0.5 rounded"
+              style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-muted); opacity: {llmModelsLoading ? 0.5 : 1};">
+              {llmModelsLoading ? '...' : 'Refresh'}
+            </button>
+          </div>
+          {#if availableModels.length > 0}
+            <select id="llm-model"
+              value={currentModel()}
+              onchange={(e) => setCurrentModel((e.target as HTMLSelectElement).value)}
+              class="w-full rounded-lg px-3 py-2 text-sm"
+              style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); outline: none;">
+              {#each availableModels as m}
+                <option value={m}>{m}</option>
+              {/each}
+            </select>
+          {:else}
+            <input id="llm-model" type="text"
+              value={currentModel()}
+              oninput={(e) => setCurrentModel((e.target as HTMLInputElement).value)}
+              placeholder={llm.provider === 'local' ? 'llama3' : 'claude-sonnet-4-6'}
+              class="w-full rounded-lg px-3 py-2 text-sm"
+              style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); outline: none;" />
+          {/if}
         </div>
-        <div>
-          <label for="local-base-url" class="block text-xs mb-1" style="color: var(--color-text-secondary)">Local base URL</label>
-          <input id="local-base-url" type="url" bind:value={llm.local_base_url} class="w-full rounded-lg px-3 py-2 text-sm"
-            style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); outline: none;" />
-        </div>
-        <div>
-          <label for="local-model" class="block text-xs mb-1" style="color: var(--color-text-secondary)">Local model</label>
-          <input id="local-model" type="text" bind:value={llm.local_model} class="w-full rounded-lg px-3 py-2 text-sm"
-            style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); outline: none;" />
-        </div>
+        {#if llm.provider !== 'anthropic'}
+          <div class="col-span-2">
+            <label for="local-base-url" class="block text-xs mb-1" style="color: var(--color-text-secondary)">Local base URL</label>
+            <input id="local-base-url" type="url" bind:value={llm.local_base_url}
+              placeholder="http://localhost:11434"
+              class="w-full rounded-lg px-3 py-2 text-sm"
+              style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); outline: none;" />
+          </div>
+        {/if}
       </div>
       {#if llmError}<div class="text-sm" style="color: var(--color-accent-red)">{llmError}</div>{/if}
+      {#if llmTestResult}
+        <div class="text-xs rounded px-3 py-2"
+          style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: {llmTestResult.ok ? 'var(--color-accent-green)' : 'var(--color-accent-red)'};">
+          {#if llmTestResult.ok}
+            Connected — {llmTestResult.message}
+          {:else}
+            {llmTestResult.error}
+          {/if}
+        </div>
+      {/if}
       <div class="flex items-center gap-3">
         <button onclick={saveLlmSettings} disabled={llmSaving} class="px-5 py-2 rounded-lg text-sm font-medium"
           style="background: var(--color-accent-blue); color: white; opacity: {llmSaving ? 0.5 : 1};">
           {llmSaving ? 'Saving...' : 'Save LLM'}
+        </button>
+        <button onclick={testLlmConnection} disabled={llmTesting} class="px-5 py-2 rounded-lg text-sm font-medium"
+          style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-primary); opacity: {llmTesting ? 0.5 : 1};">
+          {llmTesting ? 'Testing...' : 'Test Connection'}
         </button>
         {#if llmSaved}<span class="text-sm" style="color: var(--color-accent-green)">Saved ✓</span>{/if}
       </div>

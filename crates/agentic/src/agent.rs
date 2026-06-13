@@ -19,6 +19,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use reqwest::header::CONTENT_TYPE;
 use chrono::NaiveDate;
 use economind_core::model::{DailyCandleEntry, Symbol};
 use economind_db::{
@@ -397,6 +398,89 @@ impl GetMacroContextTool {
     }
 }
 
+// ── ChatAgent trait ───────────────────────────────────────────────────────────
+
+/// Common interface for Anthropic-backed and local chat agents.
+#[async_trait::async_trait]
+pub trait ChatAgent: Send + Sync {
+    async fn chat(&self, message: &str, history: Vec<ChatMessage>) -> Result<String>;
+    async fn chat_as(
+        &self,
+        persona_id: &str,
+        message: &str,
+        history: Vec<ChatMessage>,
+        ctx: DisclosureContext,
+    ) -> Result<String>;
+    fn list_personas(&self) -> Vec<(String, String, String)>;
+}
+
+// ── LocalChatAgent ────────────────────────────────────────────────────────────
+
+/// Simple chat agent backed by any OpenAI-compatible local server (e.g. Ollama).
+/// Does not use rig or tool calling.
+pub struct LocalChatAgent {
+    client: reqwest::Client,
+    base_url: String,
+    model: String,
+}
+
+impl LocalChatAgent {
+    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
+        let base_url = base_url.into().trim_end_matches('/').to_string();
+        Self {
+            client: reqwest::Client::new(),
+            base_url,
+            model: model.into(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ChatAgent for LocalChatAgent {
+    async fn chat(&self, message: &str, history: Vec<ChatMessage>) -> Result<String> {
+        let mut messages: Vec<serde_json::Value> = history
+            .into_iter()
+            .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+            .collect();
+        messages.push(serde_json::json!({"role": "user", "content": message}));
+
+        let url = format!("{}/v1/chat/completions", self.base_url);
+        let body = serde_json::json!({"model": self.model, "messages": messages});
+
+        let resp = self
+            .client
+            .post(&url)
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<serde_json::Value>()
+            .await?;
+
+        let text = resp["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Unexpected local LLM response: {resp}"))?
+            .to_string();
+
+        Ok(text)
+    }
+
+    async fn chat_as(
+        &self,
+        _persona_id: &str,
+        message: &str,
+        history: Vec<ChatMessage>,
+        _ctx: DisclosureContext,
+    ) -> Result<String> {
+        self.chat(message, history).await
+    }
+
+    fn list_personas(&self) -> Vec<(String, String, String)> {
+        vec![]
+    }
+}
+
 // ── ChatService ───────────────────────────────────────────────────────────────
 
 /// Drives an Economind chat agent backed by rig + Anthropic.
@@ -554,5 +638,26 @@ impl ChatService {
     /// Register a custom persona at runtime.
     pub fn register_persona(&self, persona: Arc<dyn crate::persona::Persona>) {
         self.personas.register(persona);
+    }
+}
+
+#[async_trait::async_trait]
+impl ChatAgent for ChatService {
+    async fn chat(&self, message: &str, history: Vec<ChatMessage>) -> Result<String> {
+        self.chat(message, history).await
+    }
+
+    async fn chat_as(
+        &self,
+        persona_id: &str,
+        message: &str,
+        history: Vec<ChatMessage>,
+        ctx: DisclosureContext,
+    ) -> Result<String> {
+        self.chat_as(persona_id, message, history, ctx).await
+    }
+
+    fn list_personas(&self) -> Vec<(String, String, String)> {
+        self.list_personas()
     }
 }
