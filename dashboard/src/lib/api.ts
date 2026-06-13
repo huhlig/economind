@@ -409,31 +409,34 @@ interface BackendPortfolioSummary {
   portfolio_value: string;
   available_cash: string;
   current_drawdown: string;
+  total_unrealized_pnl: string;
   open_positions: Array<{
     id: string;
     symbol: string;
     shares: string;
     entry_price: string;
     entry_at: string;
+    current_price?: string;
+    unrealized_pnl?: string;
+    side: string;
   }>;
 }
 
 function toPortfolioSummary(raw: BackendPortfolioSummary): PortfolioSummary {
   const equity = toNumber(raw.portfolio_value) ?? 0;
   const cash = toNumber(raw.available_cash) ?? 0;
-  const invested = equity - cash;
   return {
     total_equity: equity,
     cash,
-    unrealized_pnl: 0,
+    unrealized_pnl: toNumber(raw.total_unrealized_pnl) ?? 0,
     positions: raw.open_positions.map(p => ({
       id: p.id,
       symbol: p.symbol,
       quantity: toNumber(p.shares) ?? 0,
       average_cost: toNumber(p.entry_price) ?? 0,
-      side: 'Long' as const,
-      current_price: undefined,
-      unrealized_pnl: undefined,
+      side: (p.side === 'Short' ? 'Short' : 'Long') as 'Long' | 'Short',
+      current_price: toNumber(p.current_price ?? ''),
+      unrealized_pnl: toNumber(p.unrealized_pnl ?? ''),
     })),
   };
 }

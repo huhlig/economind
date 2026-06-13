@@ -20,7 +20,9 @@ use axum::{
 };
 use tracing::instrument;
 use chrono::{DateTime, Utc};
-use economind_db::PortfolioStorage;
+use economind_db::{CandleStorage, PortfolioStorage};
+use economind_core::model::Symbol;
+use futures::StreamExt;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -53,6 +55,9 @@ pub struct PositionResponse {
     pub shares: String,
     pub entry_price: String,
     pub entry_at: String,
+    pub current_price: Option<String>,
+    pub unrealized_pnl: Option<String>,
+    pub side: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,6 +66,7 @@ pub struct PortfolioSummary {
     pub available_cash: String,
     pub current_drawdown: String,
     pub open_positions: Vec<PositionResponse>,
+    pub total_unrealized_pnl: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +101,21 @@ pub struct WatchResponse {
     pub added_at: String,
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Fetch the latest close price for a symbol from DuckDB bars (last 30 days).
+async fn latest_close(state: &AppState, symbol: &Symbol) -> Option<Decimal> {
+    let to = Utc::now().date_naive();
+    let from = to - chrono::Duration::days(30);
+    let stream = state
+        .store()
+        .query_daily_candles(symbol, from..to)
+        .await
+        .ok()?;
+    let bars: Vec<_> = stream.collect().await;
+    bars.last().map(|b| b.close)
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 /// `GET /api/v1/positions`
@@ -106,22 +127,33 @@ async fn list_open_positions(State(state): State<AppState>) -> ApiResult<Json<Po
         .await
         .map_err(ApiError::Storage)?;
 
-    let positions = portfolio
-        .open_positions
-        .iter()
-        .map(|p| PositionResponse {
+    let mut positions = Vec::new();
+    let mut total_unrealized = Decimal::ZERO;
+
+    for p in &portfolio.open_positions {
+        let current = latest_close(&state, &p.symbol).await;
+        let unrealized = current.map(|price| (price - p.entry_price) * p.shares);
+        if let Some(u) = unrealized {
+            total_unrealized += u;
+        }
+        let side = if p.shares >= Decimal::ZERO { "Long" } else { "Short" }.to_string();
+        positions.push(PositionResponse {
             id: p.id,
             symbol: p.symbol.as_str().to_string(),
             shares: p.shares.to_string(),
             entry_price: p.entry_price.to_string(),
             entry_at: p.entry_at.to_rfc3339(),
-        })
-        .collect();
+            current_price: current.map(|v| v.to_string()),
+            unrealized_pnl: unrealized.map(|v| v.to_string()),
+            side,
+        });
+    }
 
     Ok(Json(PortfolioSummary {
         portfolio_value: portfolio.portfolio_value.to_string(),
         available_cash: portfolio.available_cash.to_string(),
         current_drawdown: portfolio.current_drawdown.to_string(),
+        total_unrealized_pnl: total_unrealized.to_string(),
         open_positions: positions,
     }))
 }
@@ -138,21 +170,29 @@ async fn set_cash(
     }
     state.store().set_cash(cash).await.map_err(ApiError::Storage)?;
     let portfolio = state.store().load_portfolio_state().await.map_err(ApiError::Storage)?;
-    let positions = portfolio
-        .open_positions
-        .iter()
-        .map(|p| PositionResponse {
+    let mut positions = Vec::new();
+    let mut total_unrealized = Decimal::ZERO;
+    for p in &portfolio.open_positions {
+        let current = latest_close(&state, &p.symbol).await;
+        let unrealized = current.map(|price| (price - p.entry_price) * p.shares);
+        if let Some(u) = unrealized { total_unrealized += u; }
+        let side = if p.shares >= Decimal::ZERO { "Long" } else { "Short" }.to_string();
+        positions.push(PositionResponse {
             id: p.id,
             symbol: p.symbol.as_str().to_string(),
             shares: p.shares.to_string(),
             entry_price: p.entry_price.to_string(),
             entry_at: p.entry_at.to_rfc3339(),
-        })
-        .collect();
+            current_price: current.map(|v| v.to_string()),
+            unrealized_pnl: unrealized.map(|v| v.to_string()),
+            side,
+        });
+    }
     Ok(Json(PortfolioSummary {
         portfolio_value: portfolio.portfolio_value.to_string(),
         available_cash: portfolio.available_cash.to_string(),
         current_drawdown: portfolio.current_drawdown.to_string(),
+        total_unrealized_pnl: total_unrealized.to_string(),
         open_positions: positions,
     }))
 }
@@ -191,12 +231,18 @@ async fn buy_position(
         .await
         .map_err(ApiError::Storage)?;
 
+    let current = latest_close(&state, &pos.symbol).await;
+    let unrealized = current.map(|price| (price - pos.entry_price) * pos.shares);
+    let side = if pos.shares >= Decimal::ZERO { "Long" } else { "Short" }.to_string();
     Ok(Json(PositionResponse {
         id: pos.id,
         symbol: pos.symbol.as_str().to_string(),
         shares: pos.shares.to_string(),
         entry_price: pos.entry_price.to_string(),
         entry_at: pos.entry_at.to_rfc3339(),
+        current_price: current.map(|v| v.to_string()),
+        unrealized_pnl: unrealized.map(|v| v.to_string()),
+        side,
     }))
 }
 
@@ -251,12 +297,18 @@ async fn get_position(
         .map_err(ApiError::Storage)?
         .ok_or(ApiError::NotFound)?;
 
+    let current = latest_close(&state, &pos.symbol).await;
+    let unrealized = current.map(|price| (price - pos.entry_price) * pos.shares);
+    let side = if pos.shares >= Decimal::ZERO { "Long" } else { "Short" }.to_string();
     Ok(Json(PositionResponse {
         id: pos.id,
         symbol: pos.symbol.as_str().to_string(),
         shares: pos.shares.to_string(),
         entry_price: pos.entry_price.to_string(),
         entry_at: pos.entry_at.to_rfc3339(),
+        current_price: current.map(|v| v.to_string()),
+        unrealized_pnl: unrealized.map(|v| v.to_string()),
+        side,
     }))
 }
 
