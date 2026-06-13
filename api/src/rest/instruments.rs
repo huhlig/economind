@@ -11,7 +11,7 @@
 
 use axum::{
     extract::{Path, State},
-    routing::{delete, get, post},
+    routing::get,
     Json, Router,
 };
 use economind_core::model::Symbol;

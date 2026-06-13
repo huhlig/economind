@@ -91,3 +91,110 @@ pub fn backtest_patterns(
 
     stats
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::EngineConfig;
+    use economind_core::model::{CandleEntry, PatternDetection, PatternType};
+    use chrono::NaiveDateTime;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    fn dec(s: &str) -> Decimal { Decimal::from_str(s).unwrap() }
+
+    fn ts(secs: i64) -> NaiveDateTime {
+        NaiveDateTime::from_timestamp_opt(86400 * secs, 0).unwrap()
+    }
+
+    fn candle(secs: i64, close: &str) -> CandleEntry {
+        CandleEntry {
+            timestamp: ts(secs),
+            open: dec(close),
+            high: dec(close),
+            low: dec(close),
+            close: dec(close),
+            volume: 1_000,
+        }
+    }
+
+    fn pattern_at(pattern: PatternType, end_secs: i64, bullish: bool) -> PatternDetection {
+        let t = ts(end_secs);
+        PatternDetection {
+            pattern,
+            start_time: t,
+            apex_time: t,
+            end_time: t,
+            confidence: if bullish { 0.8 } else { 0.7 },
+        }
+    }
+
+    #[test]
+    fn backtest_empty_patterns_returns_empty_stats() {
+        let data: Vec<CandleEntry> = (0..10).map(|i| candle(i, "100")).collect();
+        let config = EngineConfig::default();
+        let stats = backtest_patterns(&data, &[], &config);
+        assert!(stats.is_empty());
+    }
+
+    #[test]
+    fn backtest_bullish_pattern_with_subsequent_breakout_is_win() {
+        // 5 flat bars at 100, then bar 5 closes at 103 (+3%) → bullish breakout
+        let mut data: Vec<CandleEntry> = (0..10).map(|i| candle(i, "100")).collect();
+        data[5].close = dec("103.00"); // +3% → breakout
+        // Pattern ends at bar 0; lookahead looks at bars 1..=5
+        let pattern = pattern_at(PatternType::AscendingTriangle, 0, true);
+        let config = EngineConfig { breakout_lookahead: 8, ..Default::default() };
+        let stats = backtest_patterns(&data, &[pattern], &config);
+        let s = &stats[&PatternType::AscendingTriangle];
+        assert_eq!(s.total, 1);
+        assert_eq!(s.wins, 1);
+        assert_eq!(s.losses, 0);
+        assert!((s.win_rate - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn backtest_bearish_pattern_with_drop_is_win() {
+        let mut data: Vec<CandleEntry> = (0..10).map(|i| candle(i, "100")).collect();
+        data[3].close = dec("98.00"); // -2% → bearish breakout
+        let pattern = pattern_at(PatternType::HeadAndShoulders, 0, false);
+        let config = EngineConfig { breakout_lookahead: 8, ..Default::default() };
+        let stats = backtest_patterns(&data, &[pattern], &config);
+        let s = &stats[&PatternType::HeadAndShoulders];
+        assert_eq!(s.wins, 1);
+        assert!((s.win_rate - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn backtest_no_breakout_is_loss() {
+        // Flat data — no 1% move ever
+        let data: Vec<CandleEntry> = (0..10).map(|i| candle(i, "100")).collect();
+        let pattern = pattern_at(PatternType::DoubleBottom, 0, true);
+        let config = EngineConfig { breakout_lookahead: 8, ..Default::default() };
+        let stats = backtest_patterns(&data, &[pattern], &config);
+        let s = &stats[&PatternType::DoubleBottom];
+        assert_eq!(s.wins, 0);
+        assert_eq!(s.losses, 1);
+        assert!((s.win_rate - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn backtest_win_rate_aggregates_correctly() {
+        // Two of same pattern: one win (breakout at bar 3), one loss (flat through bar 0)
+        // We'll use two patterns ending at different indices
+        let mut data: Vec<CandleEntry> = (0..15).map(|i| candle(i, "100")).collect();
+        data[3].close = dec("102.00");  // +2% → win for pattern ending at bar 0
+        // Pattern ending at bar 8 — bars 9..14 are flat → loss
+        let p_win  = pattern_at(PatternType::FallingWedge, 0, true);
+        let p_loss = pattern_at(PatternType::FallingWedge, 8, true);
+        let config = EngineConfig { breakout_lookahead: 5, ..Default::default() };
+        let stats = backtest_patterns(&data, &[p_win, p_loss], &config);
+        let s = &stats[&PatternType::FallingWedge];
+        assert_eq!(s.total, 2);
+        assert_eq!(s.wins, 1);
+        assert_eq!(s.losses, 1);
+        assert!((s.win_rate - 0.5).abs() < 1e-9);
+    }
+}

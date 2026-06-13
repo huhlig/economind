@@ -4,9 +4,7 @@
 
 //! GraphQL output types — thin wrappers over the DB row types.
 
-use async_graphql::{Object, SimpleObject, ID};
-use chrono::{DateTime, Utc};
-use uuid::Uuid;
+use async_graphql::{SimpleObject, ID};
 
 // ── Instrument ────────────────────────────────────────────────────────────────
 

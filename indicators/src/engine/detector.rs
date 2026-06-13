@@ -189,3 +189,264 @@ pub fn multi_timeframe_confluence(
         })
         .collect()
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use economind_core::model::{CandleEntry, PatternDetection, PatternType};
+    use chrono::NaiveDateTime;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    fn dec(s: &str) -> Decimal { Decimal::from_str(s).unwrap() }
+
+    fn ts(secs: i64) -> NaiveDateTime {
+        NaiveDateTime::from_timestamp_opt(86400 * secs, 0).unwrap()
+    }
+
+    fn candle(secs: i64, high: &str, low: &str, close: &str) -> CandleEntry {
+        CandleEntry {
+            timestamp: ts(secs),
+            open: dec(close),
+            high: dec(high),
+            low: dec(low),
+            close: dec(close),
+            volume: 10_000,
+        }
+    }
+
+    /// Flat series: every bar at exactly `price` with tiny spread.
+    fn flat_series(n: usize, price: f64) -> Vec<CandleEntry> {
+        (0..n as i64).map(|i| {
+            let p = format!("{:.2}", price);
+            let hi = format!("{:.2}", price + 0.01);
+            let lo = format!("{:.2}", price - 0.01);
+            CandleEntry {
+                timestamp: ts(i),
+                open:  dec(&p),
+                high:  dec(&hi),
+                low:   dec(&lo),
+                close: dec(&p),
+                volume: 5_000,
+            }
+        }).collect()
+    }
+
+    /// Rising series: close = base + i, high = close + 0.5, low = close - 0.5.
+    fn rising_series(n: usize, base: f64) -> Vec<CandleEntry> {
+        (0..n as i64).map(|i| {
+            let c = base + i as f64;
+            candle(i, &format!("{:.2}", c + 0.5), &format!("{:.2}", c - 0.5), &format!("{:.2}", c))
+        }).collect()
+    }
+
+    // ── atr ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn atr_output_length_equals_input() {
+        let data = rising_series(30, 50.0);
+        assert_eq!(atr(&data, 14).len(), 30);
+    }
+
+    #[test]
+    fn atr_zero_before_window_fills() {
+        let data = rising_series(30, 50.0);
+        let result = atr(&data, 14);
+        for i in 0..14 {
+            assert_eq!(result[i], 0.0, "atr[{i}] should be 0 before window fills");
+        }
+    }
+
+    #[test]
+    fn atr_positive_once_window_fills() {
+        let data = rising_series(30, 50.0);
+        let result = atr(&data, 14);
+        assert!(result[14] > 0.0, "ATR should be positive after window fills");
+    }
+
+    #[test]
+    fn atr_small_for_flat_series() {
+        let data = flat_series(30, 100.0);
+        let result = atr(&data, 14);
+        for i in 14..30 {
+            assert!(result[i] < 0.1, "atr[{i}]={} for flat series", result[i]);
+        }
+    }
+
+    #[test]
+    fn atr_larger_for_volatile_series() {
+        // Volatile: high=close+5, low=close-5
+        let data: Vec<CandleEntry> = (0..30i64)
+            .map(|i| candle(i, "105.00", "95.00", "100.00"))
+            .collect();
+        let result = atr(&data, 14);
+        // ATR should reflect the 10-point daily range
+        assert!(result[14] > 5.0, "ATR={} should reflect high volatility", result[14]);
+    }
+
+    // ── volume_sma ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn volume_sma_output_length_equals_input() {
+        let data = rising_series(30, 50.0);
+        assert_eq!(volume_sma(&data, 10).len(), 30);
+    }
+
+    #[test]
+    fn volume_sma_correct_for_uniform_volume() {
+        // All bars have volume 10_000 → SMA should be 10_000 after window fills
+        let data = rising_series(30, 50.0);
+        let result = volume_sma(&data, 10);
+        for i in 10..30 {
+            assert!((result[i] - 10_000.0).abs() < 1.0, "volume_sma[{i}]={}", result[i]);
+        }
+    }
+
+    #[test]
+    fn volume_sma_zero_before_window_fills() {
+        let data = rising_series(30, 50.0);
+        let result = volume_sma(&data, 10);
+        for i in 0..10 {
+            assert_eq!(result[i], 0.0, "volume_sma[{i}] should be 0 before window fills");
+        }
+    }
+
+    // ── validate_flagpole ─────────────────────────────────────────────────────
+
+    #[test]
+    fn flagpole_valid_when_move_exceeds_threshold() {
+        // close[0]=100, close[4]=110 → 10% move, threshold 5% → true
+        let mut data = rising_series(5, 100.0);
+        data[4].close = dec("110.00");
+        assert!(validate_flagpole(&data, 0, 4, 0.05));
+    }
+
+    #[test]
+    fn flagpole_invalid_when_move_below_threshold() {
+        // rising_series: 100→104 over 5 bars = 4% < 10% threshold → false
+        let data = rising_series(5, 100.0);
+        assert!(!validate_flagpole(&data, 0, 4, 0.10));
+    }
+
+    #[test]
+    fn flagpole_invalid_when_start_price_is_zero() {
+        let data = flat_series(5, 0.0);
+        assert!(!validate_flagpole(&data, 0, 4, 0.01));
+    }
+
+    #[test]
+    fn flagpole_works_for_bearish_move() {
+        // Price drops from 100 to 88 → -12% absolute → meets 0.10 threshold
+        let mut data = flat_series(5, 100.0);
+        data[4].close = dec("88.00");
+        assert!(validate_flagpole(&data, 0, 4, 0.10));
+    }
+
+    // ── detect_breakout ───────────────────────────────────────────────────────
+
+    #[test]
+    fn breakout_bullish_detected() {
+        // base=100, next bar closes at 102 → +2% > 1% threshold
+        let data = vec![
+            candle(0, "101", "99", "100"),
+            candle(1, "103", "101", "102"),
+        ];
+        assert_eq!(detect_breakout(&data, 0, 5, 1), Some(1));
+    }
+
+    #[test]
+    fn breakout_bearish_detected() {
+        let data = vec![
+            candle(0, "101", "99", "100"),
+            candle(1, "99", "97", "98"),   // -2% → bearish breakout
+        ];
+        assert_eq!(detect_breakout(&data, 0, 5, -1), Some(1));
+    }
+
+    #[test]
+    fn breakout_none_when_flat() {
+        let data = flat_series(10, 100.0);
+        assert!(detect_breakout(&data, 0, 8, 1).is_none());
+        assert!(detect_breakout(&data, 0, 8, -1).is_none());
+    }
+
+    #[test]
+    fn breakout_respects_lookahead_limit() {
+        // Breakout happens at index 5, but lookahead=3 from index 0 → should not find it
+        let mut data = flat_series(10, 100.0);
+        data[5].close = dec("102.00"); // +2% at index 5
+        assert!(detect_breakout(&data, 0, 3, 1).is_none());
+    }
+
+    // ── project_target ────────────────────────────────────────────────────────
+
+    #[test]
+    fn project_target_bullish_adds_height() {
+        assert!((project_target(5.0, 100.0, 1) - 105.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn project_target_bearish_subtracts_height() {
+        assert!((project_target(5.0, 100.0, -1) - 95.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn project_target_zero_height() {
+        assert!((project_target(0.0, 50.0, 1) - 50.0).abs() < 1e-5);
+    }
+
+    // ── multi_timeframe_confluence ────────────────────────────────────────────
+
+    fn make_pattern(pattern: PatternType) -> PatternDetection {
+        let t = NaiveDateTime::from_timestamp_opt(0, 0).unwrap();
+        PatternDetection { pattern, start_time: t, apex_time: t, end_time: t, confidence: 0.8 }
+    }
+
+    #[test]
+    fn confluence_empty_input() {
+        let result = multi_timeframe_confluence(&HashMap::new());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn confluence_single_timeframe_no_result() {
+        let mut map = HashMap::new();
+        map.insert("1d".to_string(), vec![make_pattern(PatternType::DoubleBottom)]);
+        assert!(multi_timeframe_confluence(&map).is_empty());
+    }
+
+    #[test]
+    fn confluence_two_timeframes_detected() {
+        let mut map = HashMap::new();
+        map.insert("1d".to_string(), vec![make_pattern(PatternType::HeadAndShoulders)]);
+        map.insert("1w".to_string(), vec![make_pattern(PatternType::HeadAndShoulders)]);
+        let results = multi_timeframe_confluence(&map);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].timeframes.len(), 2);
+        assert!((results[0].confidence_boost - 0.30).abs() < 1e-5,
+            "confidence_boost={}", results[0].confidence_boost);
+    }
+
+    #[test]
+    fn confluence_three_timeframes_higher_boost() {
+        let mut map = HashMap::new();
+        for tf in ["1d", "1w", "1m"] {
+            map.insert(tf.to_string(), vec![make_pattern(PatternType::DoubleTop)]);
+        }
+        let results = multi_timeframe_confluence(&map);
+        assert_eq!(results.len(), 1);
+        assert!((results[0].confidence_boost - 0.45).abs() < 1e-5,
+            "3 TF boost should be 0.45, got {}", results[0].confidence_boost);
+    }
+
+    #[test]
+    fn confluence_different_patterns_no_cross_match() {
+        let mut map = HashMap::new();
+        map.insert("1d".to_string(), vec![make_pattern(PatternType::DoubleBottom)]);
+        map.insert("1w".to_string(), vec![make_pattern(PatternType::DoubleTop)]);
+        // Two different patterns, each appearing in only 1 TF → no confluence
+        assert!(multi_timeframe_confluence(&map).is_empty());
+    }
+}

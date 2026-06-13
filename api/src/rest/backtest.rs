@@ -267,7 +267,7 @@ async fn get_backtest(
         "equity_curve_points": equity_curve.len(),
         "equity_curve": equity_curve.iter().take(1000).map(|p| serde_json::json!({
             "date": p.date,
-            "value": p.value,
+            "value": p.portfolio_value,
         })).collect::<Vec<_>>(),
     })))
 }

@@ -7,6 +7,9 @@ edition.workspace = true
 name = "economind-serve"
 path = "src/main.rs"
 
+[build-dependencies]
+# build.rs uses only std — no extra deps needed
+
 [dependencies]
 economind-core     = { workspace = true }
 economind-db       = { workspace = true }
@@ -26,6 +29,8 @@ axum                = { workspace = true }
 chrono              = { workspace = true }
 dotenvy             = { workspace = true }
 futures             = { workspace = true }
+include_dir         = "0.7"
+mime_guess          = "2"
 rust_decimal        = { workspace = true }
 serde               = { workspace = true }
 serde_json          = { workspace = true }

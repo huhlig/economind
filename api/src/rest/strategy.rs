@@ -11,11 +11,11 @@
 
 use axum::{
     extract::{Path, State},
-    routing::{get, post, put},
+    routing::{get, post},
     Json, Router,
 };
 use chrono::Utc;
-use economind_db::StrategyStorage;
+use economind_db::{StrategyConfigRow, StrategyStorage};
 use economind_strategy::config::{CompositionMode, PluginSpec, StrategyConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

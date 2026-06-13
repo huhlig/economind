@@ -4,7 +4,7 @@
 > The architecture document (`ARCHITECTURE.md`) is a collaborative reference, not a specification.
 > Where this plan and the architecture document conflict, this plan takes precedence.
 
-*Last updated: May 2026 — Phase 5 complete*
+*Last updated: May 2026 — Phase 8 complete*
 
 ## Progress
 
@@ -30,6 +30,12 @@
 | **5.B** REST endpoints | ✅ Complete | `instruments`, `signals`, `positions`, `strategy/configs`, `strategy/run`, `backtest`, `data/bars`, `data/fundamentals`, `data/macro` |
 | **5.C** GraphQL | ✅ Complete | `async-graphql` schema; `QueryRoot` (instruments, signals, portfolio, strategy configs, backtest runs); `MutationRoot` (add/remove instrument, update config, trigger run); GraphiQL at `/graphiql` |
 | **5.D** WebSocket | ✅ Complete | `GET /ws/signals`; `ServerEvent` enum with 7 event types; broadcast via `EventBus`; API-key auth on upgrade |
+| **7.A** MCP server | ✅ Complete | `EconomindMcpServer` via `rmcp` on port 8081; 9 tools: `get_signals`, `get_instrument`, `get_portfolio`, `get_backtest_summary`, `trigger_strategy_run`, `query_bars`, `get_macro_context`, `analyze_signal`, `analyze_instrument`; `economind mcp [--port]` CLI subcommand |
+| **7.B** LLM analysis assistant | ✅ Complete | `LlmClient` trait with `AnthropicBackend` (claude-haiku-4-5) + `LocalBackend` (OpenAI-compatible); `LlmClientConfig::from_env()` auto-selects; `analyze_signal`, `analyze_instrument`, `analyze_macro` in `economind-agentic`; `economind analyze signal/instrument/macro` CLI subcommands |
+| **8.A** Voting / Consensus mode | ✅ Complete | `VotingRunner` + `VotingRunnerBuilder` in `economind-strategy`; `StrategyStack` + `StrategyStackBuilder` building blocks; configurable quorum threshold |
+| **8.B** Ensemble / Weighted mode | ✅ Complete | `EnsembleRunner` + `EnsembleRunnerBuilder`; `WeightOptimizer` with Nelder-Mead simplex search on probability simplex; `sharpe_from_equity` / `sortino_from_equity` scoring helpers |
+| **8.C** Additional strategy plugins | ✅ Complete | `strategy-trend-follow` (EMA crossover + ADX); `strategy-kelly-sizer` (Fractional Kelly with ATR fallback + `KellyStats` helper); `strategy-regime` (Gaussian HMM Identifier via Baum-Welch + Viterbi, 4 regime labels) |
+| **8.D** Orchestrator multi-mode | ✅ Complete | `StrategyRunner` enum dispatches Pipeline/Voting/Ensemble; `run_strategy_multi` unified entry point; legacy `run_strategy` kept for backward-compat |
 
 ---
 
@@ -460,27 +466,27 @@ Phases are sequential with soft dependencies. Phase 3 (data) can be started in p
 
 ---
 
-### 6.A SvelteKit project setup
+### 6.A SvelteKit project setup — ✅ Complete
 
-| Task | Detail | Effort |
+| Task | Detail | Status |
 |------|--------|--------|
-| **6.A.1** Scaffold SvelteKit project | Create `dashboard/` at workspace root. Configure for static adapter (no SSR). Set API base URL from environment. Set up TypeScript, Tailwind CSS. | M |
-| **6.A.2** Set up API client layer | Type-safe API client generated from OpenAPI spec or hand-written to match REST endpoints. WebSocket client with reconnect logic. | M |
-| **6.A.3** Embed in binary | Cargo build script that runs `npm run build` and embeds the `build/` output using `include_dir!`. Axum serves at `/`. | M |
+| **6.A.1** Scaffold SvelteKit project | `dashboard/` with `adapter-static` SPA mode, Tailwind CSS 4 via `@tailwindcss/vite`, Lightweight Charts 5, TypeScript strict. Global layout with sidebar nav and API-key login screen. | ✅ |
+| **6.A.2** Set up API client layer | `src/lib/api.ts` — typed REST client for all endpoints. `src/lib/ws.ts` — WebSocket client with exponential-backoff reconnect. `src/lib/stores/auth.ts` + `events.ts` — reactive Svelte stores. | ✅ |
+| **6.A.3** Embed in binary | `api/build.rs` runs `npm run build`. `include_dir!` embeds `dashboard/build/`. Axum `fallback(serve_dashboard)` serves static assets with SPA index.html fallback. `mime_guess` for correct Content-Type. | ✅ |
 
 ---
 
-### 6.B Dashboard views
+### 6.B Dashboard views — ✅ Complete
 
-| Task | Detail | Effort |
+| Task | Detail | Status |
 |------|--------|--------|
-| **6.B.1** Overview / home view | Live signal feed (WebSocket), open positions summary, today's P&L, recent strategy run status, key system metrics. | M |
-| **6.B.2** Signals Explorer | Table with search, filter by strategy / symbol / score / date range. Click signal for full detail (context snapshot, rationale, linked backtest performance). | M |
-| **6.B.3** Portfolio view | Open positions table with live P&L (mark-to-market from latest bar). Closed trades history. Simple equity chart. | M |
-| **6.B.4** Strategy Manager | List of strategy configs. Edit parameters inline. Enable/disable toggle. Manual run trigger. Run history with outcome summary. | M |
-| **6.B.5** Backtest view | Form to configure and launch a backtest (strategy, date range, initial capital). Results panel: equity curve chart, metrics table, trade log. | L |
-| **6.B.6** Data Explorer | Instrument browser with bar chart, latest fundamentals, news feed. DuckDB ad hoc query editor (POST query → tabular results). | L |
-| **6.B.7** Settings view | API key management for data sources and brokers. Ingestion schedule display and manual trigger. System health indicators. | M |
+| **6.B.1** Overview / home view | KPI cards (equity, cash, positions, active strategies). Recent signals table, live WebSocket event log, open positions summary, recent backtest results. Auto-refreshes on WS events. | ✅ |
+| **6.B.2** Signals Explorer | Filterable table (strategy, symbol, direction). Auto-refreshes on `signal_emitted` WS event. Shows strength, type, timestamp. | ✅ |
+| **6.B.3** Portfolio view | Open positions table with side, qty, avg cost, current price, unrealized P&L. Portfolio equity/cash/unrealized P&L KPIs. Refreshes on position events. | ✅ |
+| **6.B.4** Strategy Manager | Config cards with enable/disable toggle, inline Run Now button, plugin tags, universe chips. Edit strategy page (`/strategies/[id]`) with name, description, universe, JSON parameters editor. | ✅ |
+| **6.B.5** Backtest view | Launch form (strategy, date range, capital). Run history list. Detail panel: 8-metric grid, Lightweight Charts equity curve (AreaSeries v5 API), scrollable trade log. | ✅ |
+| **6.B.6** Data Explorer | Instrument selector + date range. Lightweight Charts candlestick chart (CandlestickSeries v5 API). OHLCV table sorted newest-first. | ✅ |
+| **6.B.7** Settings view | API key replace form (masked current key display). Sign-out button. About section. | ✅ |
 
 ---
 

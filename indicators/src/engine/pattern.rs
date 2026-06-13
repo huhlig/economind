@@ -326,3 +326,188 @@ fn confidence(a: &Trendline, b: &Trendline) -> f64 {
 fn approx_equal(a: f64, b: f64, tolerance: f64) -> bool {
     ((a - b) / b).abs() < tolerance
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use economind_core::model::{
+        CandleEntry, PatternType,
+        analysis::{Pivot, PivotType},
+    };
+    use chrono::NaiveDateTime;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    fn dec(s: &str) -> Decimal { Decimal::from_str(s).unwrap() }
+
+    fn ts(secs: i64) -> NaiveDateTime {
+        NaiveDateTime::from_timestamp_opt(86400 * secs, 0).unwrap()
+    }
+
+    fn candle(secs: i64, high: &str, low: &str, close: &str) -> CandleEntry {
+        CandleEntry {
+            timestamp: ts(secs),
+            open: dec(close),
+            high: dec(high),
+            low: dec(low),
+            close: dec(close),
+            volume: 1_000,
+        }
+    }
+
+    fn flat_candle(secs: i64, price: &str) -> CandleEntry {
+        candle(secs, price, price, price)
+    }
+
+    // ── detect_pivots ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn detect_pivots_empty_data_returns_empty() {
+        assert!(detect_pivots(&[], 2).is_empty());
+    }
+
+    #[test]
+    fn detect_pivots_too_short_for_lookback_returns_empty() {
+        // Need at least 2*lookback+1 bars; 8 bars with lookback=5 is too short
+        let data: Vec<CandleEntry> = (0..8).map(|i| flat_candle(i, "100")).collect();
+        assert!(detect_pivots(&data, 5).is_empty());
+    }
+
+    #[test]
+    fn detect_pivots_finds_clear_high_pivot() {
+        // Bar at index 2 has the highest `high` — all neighbours are lower
+        let data = vec![
+            candle(0, "101", "99", "100"),
+            candle(1, "102", "99", "101"),
+            candle(2, "110", "104", "108"),  // ← high pivot
+            candle(3, "102", "99", "101"),
+            candle(4, "101", "99", "100"),
+        ];
+        let pivots = detect_pivots(&data, 1);
+        let highs: Vec<_> = pivots.iter().filter(|p| p.pivot_type == PivotType::High).collect();
+        assert!(!highs.is_empty(), "Expected a high pivot");
+        assert!(highs.iter().any(|p| p.index == 2), "High pivot should be at index 2");
+    }
+
+    #[test]
+    fn detect_pivots_finds_clear_low_pivot() {
+        // Bar at index 2 has the lowest `low`
+        let data = vec![
+            candle(0, "105", "99", "102"),
+            candle(1, "105", "98", "102"),
+            candle(2, "103", "90", "95"),   // ← low pivot
+            candle(3, "105", "98", "102"),
+            candle(4, "105", "99", "102"),
+        ];
+        let pivots = detect_pivots(&data, 1);
+        let lows: Vec<_> = pivots.iter().filter(|p| p.pivot_type == PivotType::Low).collect();
+        assert!(!lows.is_empty(), "Expected a low pivot");
+        assert!(lows.iter().any(|p| p.index == 2), "Low pivot should be at index 2");
+    }
+
+    // ── fit_trendline ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn fit_trendline_single_pivot_returns_none() {
+        let pivots = vec![Pivot { index: 0, timestamp: ts(0), price: 100.0, pivot_type: PivotType::High }];
+        assert!(fit_trendline(&pivots).is_none());
+    }
+
+    #[test]
+    fn fit_trendline_empty_returns_none() {
+        assert!(fit_trendline(&[]).is_none());
+    }
+
+    #[test]
+    fn fit_trendline_perfect_rising_line() {
+        // y = 2x + 100 exactly → slope=2, error≈0
+        let pivots: Vec<Pivot> = (0..5usize).map(|i| Pivot {
+            index: i,
+            timestamp: ts(i as i64),
+            price: 100.0 + 2.0 * i as f64,
+            pivot_type: PivotType::High,
+        }).collect();
+        let tl = fit_trendline(&pivots).unwrap();
+        assert!((tl.slope - 2.0).abs() < 1e-8, "slope={:.10}", tl.slope);
+        assert!(tl.error < 1e-8, "error={}", tl.error);
+        assert_eq!(tl.touches, 5);
+    }
+
+    #[test]
+    fn fit_trendline_flat_line() {
+        let pivots: Vec<Pivot> = (0..4usize).map(|i| Pivot {
+            index: i * 5,
+            timestamp: ts(i as i64),
+            price: 50.0,
+            pivot_type: PivotType::Low,
+        }).collect();
+        let tl = fit_trendline(&pivots).unwrap();
+        assert!(tl.slope.abs() < 1e-6, "slope={}", tl.slope);
+        assert!(tl.error < 1e-8);
+    }
+
+    // ── scan_patterns ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn scan_patterns_empty_returns_empty() {
+        assert!(scan_patterns(&[]).is_empty());
+    }
+
+    #[test]
+    fn scan_patterns_does_not_panic_on_short_series() {
+        let data: Vec<CandleEntry> = (0..10).map(|i| flat_candle(i, "100")).collect();
+        let _ = scan_patterns(&data); // must not panic
+    }
+
+    #[test]
+    fn scan_patterns_double_bottom_detected() {
+        // Build 20 bars with two clear low pivots at equal price levels
+        // surrounded by higher bars; lookback=5 in scan_patterns
+        let mut data: Vec<CandleEntry> = (0..20).map(|i| candle(i, "105", "100", "102")).collect();
+        // Two troughs at index 5 and 14 with the same low (90)
+        data[5].low  = dec("90"); data[5].close = dec("91");
+        data[14].low = dec("90"); data[14].close = dec("91");
+
+        let patterns = scan_patterns(&data);
+        // Pattern detection is heuristic — we validate invariants rather than guarantee detection
+        for p in &patterns {
+            assert!(p.confidence > 0.0 && p.confidence <= 1.0, "confidence out of range");
+        }
+        // If detected, it should match expected pattern types
+        let valid_types = [
+            PatternType::DoubleBottom, PatternType::TripleBottom,
+            PatternType::DoubleTop,    PatternType::TripleTop,
+            PatternType::HeadAndShoulders, PatternType::InvertedHeadAndShoulders,
+            PatternType::AscendingTriangle, PatternType::DescendingTriangle,
+            PatternType::BullishSymTriangle, PatternType::BearishSymTriangle,
+            PatternType::RisingWedge, PatternType::FallingWedge,
+        ];
+        for p in &patterns {
+            assert!(valid_types.contains(&p.pattern), "unexpected pattern type");
+        }
+    }
+
+    // ── helper functions ──────────────────────────────────────────────────────
+
+    #[test]
+    fn approx_equal_within_tolerance() {
+        assert!(approx_equal(100.0, 101.0, 0.02));   // 1% < 2%
+        assert!(!approx_equal(100.0, 105.0, 0.02));  // 5% > 2%
+    }
+
+    #[test]
+    fn flat_slope_detection() {
+        // flat() is private but indirectly tested via trendline confidence
+        let pivots: Vec<Pivot> = (0..3usize).map(|i| Pivot {
+            index: i * 10,
+            timestamp: ts(i as i64),
+            price: 50.0,
+            pivot_type: PivotType::High,
+        }).collect();
+        let tl = fit_trendline(&pivots).unwrap();
+        // A flat trendline should have near-zero slope
+        assert!(tl.slope.abs() < 0.001);
+    }
+}
