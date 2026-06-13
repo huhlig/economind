@@ -13,6 +13,8 @@
 //!
 //! All async methods wrap DuckDB's synchronous API via `tokio::task::spawn_blocking`.
 
+use tracing::{debug, instrument, warn};
+
 use crate::storage::{
     BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, ChatMessageRow,
     ChatSessionRow, ChatStorage, EquityCurvePoint, MacroSeriesPoint, MacroStorage,
@@ -351,7 +353,7 @@ impl MetadataStorage for DuckDatabase {
                 (Some(s), Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
                         "SELECT symbol, headline, summary, story, url, evaluation, \
-                                published_at, fetched_at FROM news \
+                                published_at::VARCHAR, fetched_at::VARCHAR FROM news \
                          WHERE symbol = ? AND published_at >= ? AND published_at < ? \
                          ORDER BY published_at DESC",
                     )?;
@@ -362,7 +364,7 @@ impl MetadataStorage for DuckDatabase {
                 (Some(s), None, _) => {
                     let mut stmt = conn.prepare(
                         "SELECT symbol, headline, summary, story, url, evaluation, \
-                                published_at, fetched_at FROM news \
+                                published_at::VARCHAR, fetched_at::VARCHAR FROM news \
                          WHERE symbol = ? ORDER BY published_at DESC",
                     )?;
                     stmt.query_map(params![s], duck_row_to_news)?
@@ -372,7 +374,7 @@ impl MetadataStorage for DuckDatabase {
                 (None, Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
                         "SELECT symbol, headline, summary, story, url, evaluation, \
-                                published_at, fetched_at FROM news \
+                                published_at::VARCHAR, fetched_at::VARCHAR FROM news \
                          WHERE published_at >= ? AND published_at < ? \
                          ORDER BY published_at DESC",
                     )?;
@@ -383,7 +385,7 @@ impl MetadataStorage for DuckDatabase {
                 _ => {
                     let mut stmt = conn.prepare(
                         "SELECT symbol, headline, summary, story, url, evaluation, \
-                                published_at, fetched_at FROM news \
+                                published_at::VARCHAR, fetched_at::VARCHAR FROM news \
                          ORDER BY published_at DESC",
                     )?;
                     stmt.query_map([], duck_row_to_news)?
@@ -409,7 +411,7 @@ impl MetadataStorage for DuckDatabase {
                 "INSERT INTO income_statements \
                     (symbol, period_end, period_type, revenue, cogs, operating_income, \
                      ebit, net_income, eps, interest_expense, tax_expense) \
-                 VALUES (?, ?, 'annual', ?, ?, ?, ?, ?, ?, ?, ?) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                  ON CONFLICT (symbol, period_end, period_type) DO UPDATE SET \
                     revenue=EXCLUDED.revenue, cogs=EXCLUDED.cogs, \
                     operating_income=EXCLUDED.operating_income, ebit=EXCLUDED.ebit, \
@@ -421,6 +423,7 @@ impl MetadataStorage for DuckDatabase {
                 stmt.execute(params![
                     item.symbol.as_str(),
                     item.period_end.to_string(),
+                    item.period_type,
                     d2f(item.revenue),
                     d2f(item.cogs),
                     d2f(item.operating_income),
@@ -453,7 +456,7 @@ impl MetadataStorage for DuckDatabase {
             let results: Vec<IncomeStatement> = match (&sym, &start, &end) {
                 (Some(s), Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, revenue, cogs, operating_income, \
+                        "SELECT symbol, period_end::VARCHAR, period_type, revenue, cogs, operating_income, \
                                 ebit, net_income, eps, interest_expense, tax_expense \
                          FROM income_statements \
                          WHERE symbol=? AND period_end>=? AND period_end<? \
@@ -465,7 +468,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (Some(s), None, _) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, revenue, cogs, operating_income, \
+                        "SELECT symbol, period_end::VARCHAR, period_type, revenue, cogs, operating_income, \
                                 ebit, net_income, eps, interest_expense, tax_expense \
                          FROM income_statements WHERE symbol=? ORDER BY period_end DESC",
                     )?;
@@ -475,7 +478,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (None, Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, revenue, cogs, operating_income, \
+                        "SELECT symbol, period_end::VARCHAR, period_type, revenue, cogs, operating_income, \
                                 ebit, net_income, eps, interest_expense, tax_expense \
                          FROM income_statements \
                          WHERE period_end>=? AND period_end<? ORDER BY period_end DESC",
@@ -486,7 +489,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 _ => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, revenue, cogs, operating_income, \
+                        "SELECT symbol, period_end::VARCHAR, period_type, revenue, cogs, operating_income, \
                                 ebit, net_income, eps, interest_expense, tax_expense \
                          FROM income_statements ORDER BY symbol, period_end DESC",
                     )?;
@@ -544,7 +547,7 @@ impl MetadataStorage for DuckDatabase {
                 match (&sym, &start, &end) {
                     (Some(s), Some(st), Some(e)) => {
                         let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, total_assets, total_debt, total_equity, cash \
+                        "SELECT symbol, period_end::VARCHAR, total_assets, total_debt, total_equity, cash \
                          FROM balance_sheets WHERE symbol=? AND period_end>=? AND period_end<? \
                          ORDER BY period_end DESC")?;
                         stmt.query_map(params![s, st, e], duck_row_to_balance)?
@@ -553,7 +556,7 @@ impl MetadataStorage for DuckDatabase {
                     }
                     (Some(s), None, _) => {
                         let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, total_assets, total_debt, total_equity, cash \
+                        "SELECT symbol, period_end::VARCHAR, total_assets, total_debt, total_equity, cash \
                          FROM balance_sheets WHERE symbol=? ORDER BY period_end DESC")?;
                         stmt.query_map(params![s], duck_row_to_balance)?
                             .filter_map(|r| r.ok())
@@ -561,7 +564,7 @@ impl MetadataStorage for DuckDatabase {
                     }
                     (None, Some(st), Some(e)) => {
                         let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, total_assets, total_debt, total_equity, cash \
+                        "SELECT symbol, period_end::VARCHAR, total_assets, total_debt, total_equity, cash \
                          FROM balance_sheets WHERE period_end>=? AND period_end<? \
                          ORDER BY period_end DESC")?;
                         stmt.query_map(params![st, e], duck_row_to_balance)?
@@ -570,7 +573,7 @@ impl MetadataStorage for DuckDatabase {
                     }
                     _ => {
                         let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, total_assets, total_debt, total_equity, cash \
+                        "SELECT symbol, period_end::VARCHAR, total_assets, total_debt, total_equity, cash \
                          FROM balance_sheets ORDER BY symbol, period_end DESC")?;
                         stmt.query_map([], duck_row_to_balance)?
                             .filter_map(|r| r.ok())
@@ -599,14 +602,12 @@ impl MetadataStorage for DuckDatabase {
                     capex=EXCLUDED.capex, free_cash_flow=EXCLUDED.free_cash_flow",
             )?;
             for item in &items {
-                let ocf = d2f(item.operating_cash_flow);
-                let capex = d2f(item.capex);
                 stmt.execute(params![
                     item.symbol.as_str(),
                     item.period_end.to_string(),
-                    ocf,
-                    capex,
-                    ocf - capex,
+                    d2f(item.operating_cash_flow),
+                    d2f(item.capex),
+                    d2f(item.operating_cash_flow - item.capex),
                 ])?;
             }
             Ok(())
@@ -631,7 +632,7 @@ impl MetadataStorage for DuckDatabase {
             let results = match (&sym, &start, &end) {
                 (Some(s), Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, operating_cash_flow, capex \
+                        "SELECT symbol, period_end::VARCHAR, operating_cash_flow, capex \
                          FROM cash_flow_statements \
                          WHERE symbol=? AND period_end>=? AND period_end<? \
                          ORDER BY period_end DESC",
@@ -642,7 +643,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (Some(s), None, _) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, operating_cash_flow, capex \
+                        "SELECT symbol, period_end::VARCHAR, operating_cash_flow, capex \
                          FROM cash_flow_statements WHERE symbol=? ORDER BY period_end DESC",
                     )?;
                     stmt.query_map(params![s], duck_row_to_cash_flow)?
@@ -651,7 +652,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (None, Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, operating_cash_flow, capex \
+                        "SELECT symbol, period_end::VARCHAR, operating_cash_flow, capex \
                          FROM cash_flow_statements \
                          WHERE period_end>=? AND period_end<? ORDER BY period_end DESC",
                     )?;
@@ -661,7 +662,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 _ => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, period_end, operating_cash_flow, capex \
+                        "SELECT symbol, period_end::VARCHAR, operating_cash_flow, capex \
                          FROM cash_flow_statements ORDER BY symbol, period_end DESC",
                     )?;
                     stmt.query_map([], duck_row_to_cash_flow)?
@@ -718,7 +719,7 @@ impl MetadataStorage for DuckDatabase {
             let results = match (&sym, &start, &end) {
                 (Some(s), Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, ex_date, payment_date, amount FROM dividends \
+                        "SELECT symbol, ex_date::VARCHAR, payment_date::VARCHAR, amount FROM dividends \
                          WHERE symbol=? AND ex_date>=? AND ex_date<? ORDER BY ex_date DESC",
                     )?;
                     stmt.query_map(params![s, st, e], duck_row_to_dividend)?
@@ -727,7 +728,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (Some(s), None, _) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, ex_date, payment_date, amount FROM dividends \
+                        "SELECT symbol, ex_date::VARCHAR, payment_date::VARCHAR, amount FROM dividends \
                          WHERE symbol=? ORDER BY ex_date DESC",
                     )?;
                     stmt.query_map(params![s], duck_row_to_dividend)?
@@ -736,7 +737,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (None, Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, ex_date, payment_date, amount FROM dividends \
+                        "SELECT symbol, ex_date::VARCHAR, payment_date::VARCHAR, amount FROM dividends \
                          WHERE ex_date>=? AND ex_date<? ORDER BY ex_date DESC",
                     )?;
                     stmt.query_map(params![st, e], duck_row_to_dividend)?
@@ -745,7 +746,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 _ => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, ex_date, payment_date, amount FROM dividends \
+                        "SELECT symbol, ex_date::VARCHAR, payment_date::VARCHAR, amount FROM dividends \
                          ORDER BY symbol, ex_date DESC",
                     )?;
                     stmt.query_map([], duck_row_to_dividend)?
@@ -799,7 +800,7 @@ impl MetadataStorage for DuckDatabase {
             let results = match (&sym, &start, &end) {
                 (Some(s), Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, date, ratio FROM stock_splits \
+                        "SELECT symbol, date::VARCHAR, ratio FROM stock_splits \
                          WHERE symbol=? AND date>=? AND date<? ORDER BY date DESC",
                     )?;
                     stmt.query_map(params![s, st, e], duck_row_to_split)?
@@ -808,7 +809,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (Some(s), None, _) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, date, ratio FROM stock_splits \
+                        "SELECT symbol, date::VARCHAR, ratio FROM stock_splits \
                          WHERE symbol=? ORDER BY date DESC",
                     )?;
                     stmt.query_map(params![s], duck_row_to_split)?
@@ -817,7 +818,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 (None, Some(st), Some(e)) => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, date, ratio FROM stock_splits \
+                        "SELECT symbol, date::VARCHAR, ratio FROM stock_splits \
                          WHERE date>=? AND date<? ORDER BY date DESC",
                     )?;
                     stmt.query_map(params![st, e], duck_row_to_split)?
@@ -826,7 +827,7 @@ impl MetadataStorage for DuckDatabase {
                 }
                 _ => {
                     let mut stmt = conn.prepare(
-                        "SELECT symbol, date, ratio FROM stock_splits \
+                        "SELECT symbol, date::VARCHAR, ratio FROM stock_splits \
                          ORDER BY symbol, date DESC",
                     )?;
                     stmt.query_map([], duck_row_to_split)?
@@ -899,7 +900,7 @@ impl CandleStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT time, open, high, low, close, volume FROM bars \
+                "SELECT time::VARCHAR, open, high, low, close, volume FROM bars \
                  WHERE symbol=? AND interval=? AND time>=? AND time<? ORDER BY time ASC",
             )?;
             let results = stmt
@@ -965,7 +966,7 @@ impl CandleStorage for DuckDatabase {
                     .lock()
                     .map_err(|e| StorageError::Provider(e.to_string()))?;
                 let mut stmt = conn.prepare(&format!(
-                    "SELECT time, open, high, low, close, volume FROM {table} \
+                    "SELECT time::VARCHAR, open, high, low, close, volume FROM {table} \
                      WHERE symbol=? AND interval='1d' AND time>=? AND time<? ORDER BY time ASC"
                 ))?;
                 let results = stmt
@@ -1040,7 +1041,7 @@ impl MacroStorage for DuckDatabase {
             let mut results = Vec::new();
             for id in &ids {
                 let mut stmt = conn.prepare(&format!(
-                    "SELECT series_id, date, value, fetched_at FROM {table} \
+                    "SELECT series_id, date::VARCHAR, value, fetched_at::VARCHAR FROM {table} \
                      WHERE series_id=? ORDER BY date DESC LIMIT 1"
                 ))?;
                 if let Some(row) = stmt
@@ -1072,7 +1073,7 @@ impl MacroStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(&format!(
-                "SELECT series_id, date, value, fetched_at FROM {table} \
+                "SELECT series_id, date::VARCHAR, value, fetched_at::VARCHAR FROM {table} \
                  WHERE series_id=? AND date>=? AND date<? ORDER BY date ASC"
             ))?;
             Ok(stmt
@@ -1088,6 +1089,7 @@ impl MacroStorage for DuckDatabase {
 // ── PortfolioStorage ──────────────────────────────────────────────────────────
 
 impl PortfolioStorage for DuckDatabase {
+    #[instrument(skip(self), name = "db.load_portfolio_state")]
     async fn load_portfolio_state(&self) -> StorageResult<PortfolioState> {
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || -> StorageResult<PortfolioState> {
@@ -1121,33 +1123,72 @@ impl PortfolioStorage for DuckDatabase {
                 )
                 .collect();
 
-            // Estimate portfolio value from positions × latest close.
+            // Batch price lookup: one query for all open positions.
             let mut position_value = 0.0f64;
-            for pos in &open_positions {
-                let sym = pos.symbol.as_str();
-                let mut price_stmt = conn.prepare(
-                    "SELECT close FROM bars WHERE symbol=? AND interval='1d' \
-                     ORDER BY time DESC LIMIT 1",
-                )?;
-                let price: f64 = price_stmt
-                    .query_map([sym], |r| r.get::<_, f64>(0))?
+            debug!(position_count = open_positions.len(), "pricing open positions");
+            if !open_positions.is_empty() {
+                let symbols: Vec<String> = open_positions
+                    .iter()
+                    .map(|p| p.symbol.as_str().to_string())
+                    .collect();
+                let placeholders = symbols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+                let price_sql = format!(
+                    "SELECT DISTINCT ON (symbol) symbol, close \
+                     FROM bars WHERE symbol IN ({placeholders}) AND interval='1d' \
+                     ORDER BY symbol, time DESC"
+                );
+                let sym_refs: Vec<&dyn duckdb::ToSql> =
+                    symbols.iter().map(|s| s as &dyn duckdb::ToSql).collect();
+                let mut price_stmt = conn.prepare(&price_sql)?;
+                let price_map: std::collections::HashMap<String, f64> = price_stmt
+                    .query_map(sym_refs.as_slice(), |r| {
+                        let sym: String = r.get(0)?;
+                        let close: f64 = r.get(1)?;
+                        Ok((sym, close))
+                    })?
                     .filter_map(|r| r.ok())
-                    .next()
-                    .unwrap_or(pos.entry_price.to_string().parse().unwrap_or(0.0));
-                position_value += price * pos.shares.to_string().parse::<f64>().unwrap_or(0.0);
+                    .collect();
+                for pos in &open_positions {
+                    let price = match price_map.get(pos.symbol.as_str()) {
+                        Some(&p) => p,
+                        None => {
+                            warn!(symbol = pos.symbol.as_str(), "no bar data; using entry_price for valuation");
+                            d2f(pos.entry_price)
+                        }
+                    };
+                    position_value += price * d2f(pos.shares);
+                }
             }
 
-            // Get peak value for drawdown.
-            let peak: f64 = {
-                let mut s = conn.prepare("SELECT MAX(peak_value) FROM portfolio_equity")?;
-                s.query_map([], |r| r.get::<_, f64>(0))?
+            // Read peak value and cash from the last equity snapshot (for drawdown).
+            let (peak, available_cash_f): (f64, f64) = {
+                let mut s = conn.prepare(
+                    "SELECT COALESCE(MAX(peak_value), 0.0), \
+                            COALESCE((SELECT cash FROM portfolio_equity ORDER BY date DESC LIMIT 1), 0.0) \
+                     FROM portfolio_equity",
+                )?;
+                s.query_map([], |r| Ok((r.get::<_, f64>(0)?, r.get::<_, f64>(1)?)))?
                     .filter_map(|r| r.ok())
                     .next()
-                    .unwrap_or(0.0)
+                    .unwrap_or((0.0, 0.0))
             };
+
             let portfolio_value = position_value;
-            let current_drawdown = if peak > 0.0 {
-                f2d(((peak - portfolio_value) / peak).max(0.0))
+            let new_peak = f64::max(peak, portfolio_value);
+
+            // Persist today's equity snapshot so drawdown tracking stays current.
+            let today = Utc::now().date_naive().to_string();
+            let _ = conn.execute(
+                "INSERT INTO portfolio_equity (date, portfolio_value, cash, peak_value) \
+                 VALUES (?, ?, ?, ?) \
+                 ON CONFLICT (date) DO UPDATE SET \
+                    portfolio_value=EXCLUDED.portfolio_value, \
+                    peak_value=GREATEST(portfolio_equity.peak_value, EXCLUDED.peak_value)",
+                params![today, portfolio_value, available_cash_f, new_peak],
+            );
+
+            let current_drawdown = if new_peak > 0.0 {
+                f2d(((new_peak - portfolio_value) / new_peak).max(0.0))
             } else {
                 Decimal::ZERO
             };
@@ -1155,7 +1196,7 @@ impl PortfolioStorage for DuckDatabase {
             Ok(PortfolioState {
                 open_positions,
                 portfolio_value: f2d(portfolio_value),
-                available_cash: Decimal::ZERO,
+                available_cash: f2d(available_cash_f),
                 current_drawdown,
             })
         })
@@ -1163,6 +1204,40 @@ impl PortfolioStorage for DuckDatabase {
         .map_err(|e| StorageError::Provider(e.to_string()))?
     }
 
+    #[instrument(skip(self), name = "db.get_open_position")]
+    async fn get_open_position(&self, id: Uuid) -> StorageResult<Option<OpenPosition>> {
+        let conn = self.conn.clone();
+        let id_str = id.to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<Option<OpenPosition>> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, symbol, shares, entry_price, CAST(entry_at AS VARCHAR) \
+                 FROM portfolio_positions WHERE id=? AND status='open'",
+            )?;
+            Ok(stmt
+                .query_map([&id_str], |row| {
+                    let id_s: String = row.get(0)?;
+                    let sym: String = row.get(1)?;
+                    let shares: f64 = row.get(2)?;
+                    let entry_price: f64 = row.get(3)?;
+                    let entry_str: String = row.get(4)?;
+                    Ok((id_s, sym, shares, entry_price, entry_str))
+                })?
+                .filter_map(|r| r.ok())
+                .next()
+                .map(|(id_s, sym, shares, entry_price, entry_str)| OpenPosition {
+                    id: Uuid::parse_str(&id_s).unwrap_or_else(|_| Uuid::nil()),
+                    symbol: Symbol::new(&sym),
+                    shares: f2d(shares),
+                    entry_price: f2d(entry_price),
+                    entry_at: parse_datetime_utc(&entry_str),
+                }))
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    #[instrument(skip(self), fields(symbol = symbol.as_str()), name = "db.open_position")]
     async fn open_position(
         &self,
         symbol: &Symbol,
@@ -1196,6 +1271,7 @@ impl PortfolioStorage for DuckDatabase {
         .map_err(|e| StorageError::Provider(e.to_string()))?
     }
 
+    #[instrument(skip(self), name = "db.close_position")]
     async fn close_position(
         &self,
         id: Uuid,
@@ -1233,7 +1309,8 @@ impl PortfolioStorage for DuckDatabase {
         tokio::task::spawn_blocking(move || -> StorageResult<WatchItem> {
             let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
             conn.execute(
-                "INSERT OR IGNORE INTO portfolio_watchlist (symbol, added_at) VALUES (?, ?)",
+                "INSERT INTO portfolio_watchlist (symbol, added_at) VALUES (?, ?) \
+                 ON CONFLICT (symbol) DO NOTHING",
                 params![sym, now_str],
             )?;
             Ok(WatchItem {
@@ -1315,6 +1392,7 @@ impl PortfolioStorage for DuckDatabase {
 // ── StrategyStorage ───────────────────────────────────────────────────────────
 
 impl StrategyStorage for DuckDatabase {
+    #[instrument(skip(self, row), fields(id = %row.id, name = %row.name), name = "db.insert_strategy_config")]
     async fn insert_strategy_config(&self, row: &StrategyConfigRow) -> StorageResult<()> {
         let conn = self.conn.clone();
         let row = row.clone();
@@ -1359,7 +1437,7 @@ impl StrategyStorage for DuckDatabase {
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(&format!(
                 "SELECT id, name, description, composition, plugins_json, parameters_json, \
-                        enabled, auto_execute, execution_mode, version, created_at, updated_at \
+                        enabled, auto_execute, execution_mode, version, created_at::VARCHAR, updated_at::VARCHAR \
                  FROM {table} WHERE id=?"
             ))?;
             Ok(stmt
@@ -1380,7 +1458,7 @@ impl StrategyStorage for DuckDatabase {
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(&format!(
                 "SELECT id, name, description, composition, plugins_json, parameters_json, \
-                        enabled, auto_execute, execution_mode, version, created_at, updated_at \
+                        enabled, auto_execute, execution_mode, version, created_at::VARCHAR, updated_at::VARCHAR \
                  FROM {table} ORDER BY name"
             ))?;
             Ok(stmt
@@ -1424,6 +1502,7 @@ impl StrategyStorage for DuckDatabase {
         .map_err(|e| StorageError::Provider(e.to_string()))?
     }
 
+    #[instrument(skip(self, row), fields(id = %row.id, config_id = %row.config_id), name = "db.insert_strategy_run")]
     async fn insert_strategy_run(&self, row: &StrategyRunRow) -> StorageResult<()> {
         let conn = self.conn.clone();
         let row = row.clone();
@@ -1485,7 +1564,7 @@ impl StrategyStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT id, config_id, started_at, completed_at, status, signal_count, \
+                "SELECT id, config_id, started_at::VARCHAR, completed_at::VARCHAR, status, signal_count, \
                         error_message, config_snapshot_json \
                  FROM strategy_runs WHERE id=?",
             )?;
@@ -1512,14 +1591,14 @@ impl StrategyStorage for DuckDatabase {
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let sql = match &cid {
                 Some(id) => format!(
-                    "SELECT id, config_id, started_at, completed_at, status, signal_count, \
+                    "SELECT id, config_id, started_at::VARCHAR, completed_at::VARCHAR, status, signal_count, \
                             error_message, config_snapshot_json \
                      FROM strategy_runs WHERE config_id='{}' \
                      ORDER BY started_at DESC LIMIT {}",
                     id, lim
                 ),
                 None => format!(
-                    "SELECT id, config_id, started_at, completed_at, status, signal_count, \
+                    "SELECT id, config_id, started_at::VARCHAR, completed_at::VARCHAR, status, signal_count, \
                             error_message, config_snapshot_json \
                      FROM strategy_runs ORDER BY started_at DESC LIMIT {}",
                     lim
@@ -1535,6 +1614,7 @@ impl StrategyStorage for DuckDatabase {
         .map_err(|e| StorageError::Provider(e.to_string()))?
     }
 
+    #[instrument(skip(self, rows), fields(count = rows.len()), name = "db.insert_strategy_signals")]
     async fn insert_strategy_signals(&self, rows: &[StrategySignalRow]) -> StorageResult<()> {
         let conn = self.conn.clone();
         let rows: Vec<StrategySignalRow> = rows.to_vec();
@@ -1572,6 +1652,7 @@ impl StrategyStorage for DuckDatabase {
         .map_err(|e| StorageError::Provider(e.to_string()))?
     }
 
+    #[instrument(skip(self), name = "db.query_strategy_signals")]
     async fn query_strategy_signals(
         &self,
         run_id: Option<Uuid>,
@@ -1590,33 +1671,40 @@ impl StrategyStorage for DuckDatabase {
             let conn = conn
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
-            let mut conditions = Vec::new();
+            let mut condition_parts: Vec<&str> = Vec::new();
+            let mut param_strings: Vec<String> = Vec::new();
             if let Some(id) = &rid {
-                conditions.push(format!("run_id='{id}'"));
+                condition_parts.push("run_id=?");
+                param_strings.push(id.clone());
             }
             if let Some(id) = &cid {
-                conditions.push(format!("config_id='{id}'"));
+                condition_parts.push("config_id=?");
+                param_strings.push(id.clone());
             }
             if let Some(s) = &sym {
-                conditions.push(format!("symbol='{s}'"));
+                condition_parts.push("symbol=?");
+                param_strings.push(s.clone());
             }
             if let Some(d) = &since_str {
-                conditions.push(format!("emitted_at>='{d}'"));
+                condition_parts.push("emitted_at>=?");
+                param_strings.push(d.clone());
             }
-            let where_clause = if conditions.is_empty() {
+            let where_clause = if condition_parts.is_empty() {
                 String::new()
             } else {
-                format!("WHERE {}", conditions.join(" AND "))
+                format!("WHERE {}", condition_parts.join(" AND "))
             };
             let sql = format!(
                 "SELECT id, run_id, config_id, symbol, direction, identifier_score, \
                         timing_score, position_shares, position_notional, portfolio_fraction, \
-                        rationale, analysis_brief, emitted_at \
+                        rationale, analysis_brief, emitted_at::VARCHAR \
                  FROM strategy_signals {where_clause} ORDER BY emitted_at DESC LIMIT {lim}"
             );
             let mut stmt = conn.prepare(&sql)?;
+            let param_refs: Vec<&dyn duckdb::ToSql> =
+                param_strings.iter().map(|s| s as &dyn duckdb::ToSql).collect();
             Ok(stmt
-                .query_map([], duck_row_to_signal)?
+                .query_map(param_refs.as_slice(), duck_row_to_signal)?
                 .filter_map(|r| r.ok())
                 .collect())
         })
@@ -1634,7 +1722,7 @@ impl StrategyStorage for DuckDatabase {
             let mut stmt = conn.prepare(
                 "SELECT id, run_id, config_id, symbol, direction, identifier_score, \
                         timing_score, position_shares, position_notional, portfolio_fraction, \
-                        rationale, analysis_brief, emitted_at \
+                        rationale, analysis_brief, emitted_at::VARCHAR \
                  FROM strategy_signals WHERE id=?",
             )?;
             Ok(stmt
@@ -1723,10 +1811,10 @@ impl BacktestStorage for DuckDatabase {
         tokio::task::spawn_blocking(move || -> StorageResult<Option<BacktestRunRow>> {
             let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT id, config_id, config_snapshot_json, from_date, to_date, \
+                "SELECT id, config_id, config_snapshot_json, from_date::VARCHAR, to_date::VARCHAR, \
                         initial_capital, final_capital, cagr, sharpe_ratio, sortino_ratio, \
                         max_drawdown, max_drawdown_days, win_rate, profit_factor, expectancy, \
-                        total_trades, avg_hold_days, status, started_at, completed_at, error_message \
+                        total_trades, avg_hold_days, status, started_at::VARCHAR, completed_at::VARCHAR, error_message \
                  FROM backtest_runs WHERE id=?",
             )?;
             Ok(stmt
@@ -1750,18 +1838,18 @@ impl BacktestStorage for DuckDatabase {
             let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
             let sql = match &cid {
                 Some(id) => format!(
-                    "SELECT id, config_id, config_snapshot_json, from_date, to_date, \
+                    "SELECT id, config_id, config_snapshot_json, from_date::VARCHAR, to_date::VARCHAR, \
                             initial_capital, final_capital, cagr, sharpe_ratio, sortino_ratio, \
                             max_drawdown, max_drawdown_days, win_rate, profit_factor, expectancy, \
-                            total_trades, avg_hold_days, status, started_at, completed_at, error_message \
+                            total_trades, avg_hold_days, status, started_at::VARCHAR, completed_at::VARCHAR, error_message \
                      FROM backtest_runs WHERE config_id='{}' ORDER BY started_at DESC LIMIT {}",
                     id, lim
                 ),
                 None => format!(
-                    "SELECT id, config_id, config_snapshot_json, from_date, to_date, \
+                    "SELECT id, config_id, config_snapshot_json, from_date::VARCHAR, to_date::VARCHAR, \
                             initial_capital, final_capital, cagr, sharpe_ratio, sortino_ratio, \
                             max_drawdown, max_drawdown_days, win_rate, profit_factor, expectancy, \
-                            total_trades, avg_hold_days, status, started_at, completed_at, error_message \
+                            total_trades, avg_hold_days, status, started_at::VARCHAR, completed_at::VARCHAR, error_message \
                      FROM backtest_runs ORDER BY started_at DESC LIMIT {}",
                     lim
                 ),
@@ -1820,8 +1908,8 @@ impl BacktestStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT id, run_id, symbol, direction, entry_date, entry_price, \
-                        exit_date, exit_price, shares, gross_pnl, commission, net_pnl, hold_days \
+                "SELECT id, run_id, symbol, direction, entry_date::VARCHAR, entry_price, \
+                        exit_date::VARCHAR, exit_price, shares, gross_pnl, commission, net_pnl, hold_days \
                  FROM backtest_trades WHERE run_id=? ORDER BY entry_date ASC",
             )?;
             Ok(stmt
@@ -1870,7 +1958,7 @@ impl BacktestStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT run_id, date, portfolio_value, cash, drawdown \
+                "SELECT run_id, date::VARCHAR, portfolio_value, cash, drawdown \
                  FROM backtest_equity_curve WHERE run_id=? ORDER BY date ASC",
             )?;
             Ok(stmt
@@ -1923,7 +2011,7 @@ impl ChatStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT id, title, persona_id, depth, created_at, updated_at \
+                "SELECT id, title, persona_id, depth, created_at::VARCHAR, updated_at::VARCHAR \
                  FROM chat_sessions ORDER BY updated_at DESC LIMIT ?",
             )?;
             Ok(stmt
@@ -1943,7 +2031,7 @@ impl ChatStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT id, title, persona_id, depth, created_at, updated_at \
+                "SELECT id, title, persona_id, depth, created_at::VARCHAR, updated_at::VARCHAR \
                  FROM chat_sessions WHERE id=?",
             )?;
             Ok(stmt
@@ -1993,7 +2081,7 @@ impl ChatStorage for DuckDatabase {
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
             let mut stmt = conn.prepare(
-                "SELECT id, session_id, ordinal, role, content, created_at \
+                "SELECT id, session_id, ordinal, role, content, created_at::VARCHAR \
                  FROM chat_messages WHERE session_id=? ORDER BY ordinal ASC",
             )?;
             Ok(stmt
@@ -2078,14 +2166,15 @@ fn duck_row_to_income(row: &duckdb::Row) -> duckdb::Result<IncomeStatement> {
     Ok(IncomeStatement {
         symbol: Symbol::new(&row.get::<_, String>(0)?),
         period_end: parse_date(&period_str),
-        revenue: f2d(row.get::<_, f64>(2).unwrap_or(0.0)),
-        cogs: f2d(row.get::<_, f64>(3).unwrap_or(0.0)),
-        operating_income: f2d(row.get::<_, f64>(4).unwrap_or(0.0)),
-        ebit: f2d(row.get::<_, f64>(5).unwrap_or(0.0)),
-        net_income: f2d(row.get::<_, f64>(6).unwrap_or(0.0)),
-        eps: f2d(row.get::<_, f64>(7).unwrap_or(0.0)),
-        interest_expense: f2d(row.get::<_, f64>(8).unwrap_or(0.0)),
-        tax_expense: f2d(row.get::<_, f64>(9).unwrap_or(0.0)),
+        period_type: row.get::<_, String>(2).unwrap_or_else(|_| "annual".to_string()),
+        revenue: f2d(row.get::<_, f64>(3).unwrap_or(0.0)),
+        cogs: f2d(row.get::<_, f64>(4).unwrap_or(0.0)),
+        operating_income: f2d(row.get::<_, f64>(5).unwrap_or(0.0)),
+        ebit: f2d(row.get::<_, f64>(6).unwrap_or(0.0)),
+        net_income: f2d(row.get::<_, f64>(7).unwrap_or(0.0)),
+        eps: f2d(row.get::<_, f64>(8).unwrap_or(0.0)),
+        interest_expense: f2d(row.get::<_, f64>(9).unwrap_or(0.0)),
+        tax_expense: f2d(row.get::<_, f64>(10).unwrap_or(0.0)),
     })
 }
 

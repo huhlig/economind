@@ -214,6 +214,7 @@ async fn duckdb_income_statement_round_trip() {
     let items = vec![IncomeStatement {
         symbol: sym("NVDA"),
         period_end: date(2023, 12, 31),
+        period_type: "annual".to_string(),
         revenue: dec("60922000000"),
         cogs: dec("16621000000"),
         operating_income: dec("32972000000"),

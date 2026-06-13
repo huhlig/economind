@@ -110,28 +110,7 @@ impl FredConnector {
 
         let root: FredObsRoot = resp.json().await?;
         let fetched_at = Utc::now();
-
-        let points = root
-            .observations
-            .into_iter()
-            .filter_map(|obs| {
-                // FRED uses "." for missing values
-                let value = if obs.value == "." {
-                    None
-                } else {
-                    Decimal::from_str(&obs.value).ok()
-                };
-                let date = NaiveDate::parse_from_str(&obs.date, "%Y-%m-%d").ok()?;
-                Some(MacroSeriesPoint {
-                    series_id: series_id.to_string(),
-                    date,
-                    value,
-                    fetched_at,
-                })
-            })
-            .collect();
-
-        Ok(points)
+        Ok(parse_observations(series_id, root.observations, fetched_at))
     }
 
     // ── Bulk fetch ────────────────────────────────────────────────────────────
@@ -186,6 +165,33 @@ pub struct FetchStats {
     pub points_stored: usize,
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn parse_observations(
+    series_id: &str,
+    observations: Vec<FredObservation>,
+    fetched_at: chrono::DateTime<Utc>,
+) -> Vec<MacroSeriesPoint> {
+    observations
+        .into_iter()
+        .filter_map(|obs| {
+            // FRED uses "." for missing values
+            let value = if obs.value == "." {
+                None
+            } else {
+                Decimal::from_str(&obs.value).ok()
+            };
+            let date = NaiveDate::parse_from_str(&obs.date, "%Y-%m-%d").ok()?;
+            Some(MacroSeriesPoint {
+                series_id: series_id.to_string(),
+                date,
+                value,
+                fetched_at,
+            })
+        })
+        .collect()
+}
+
 // ── Serde types ───────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -197,4 +203,69 @@ struct FredObsRoot {
 struct FredObservation {
     date: String,
     value: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, TimeZone};
+
+    fn fixed_ts() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
+    }
+
+    fn obs(date: &str, value: &str) -> FredObservation {
+        FredObservation { date: date.to_string(), value: value.to_string() }
+    }
+
+    #[test]
+    fn parses_normal_observations() {
+        let points = parse_observations(
+            "DGS10",
+            vec![obs("2024-01-02", "4.05"), obs("2024-01-03", "4.10")],
+            fixed_ts(),
+        );
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].series_id, "DGS10");
+        assert_eq!(points[0].date, NaiveDate::from_ymd_opt(2024, 1, 2).unwrap());
+        assert_eq!(points[0].value, Some(Decimal::from_str("4.05").unwrap()));
+        assert_eq!(points[1].value, Some(Decimal::from_str("4.10").unwrap()));
+    }
+
+    #[test]
+    fn dot_value_becomes_none() {
+        // FRED uses "." to represent a missing observation.
+        let points = parse_observations(
+            "VIXCLS",
+            vec![obs("2024-01-02", "."), obs("2024-01-03", "14.5")],
+            fixed_ts(),
+        );
+        assert_eq!(points.len(), 2);
+        assert!(points[0].value.is_none(), "dot should map to None");
+        assert!(points[1].value.is_some());
+    }
+
+    #[test]
+    fn bad_date_row_is_dropped() {
+        let points = parse_observations(
+            "UNRATE",
+            vec![obs("not-a-date", "5.0"), obs("2024-01-02", "3.7")],
+            fixed_ts(),
+        );
+        assert_eq!(points.len(), 1, "malformed date row should be filtered out");
+        assert_eq!(points[0].date, NaiveDate::from_ymd_opt(2024, 1, 2).unwrap());
+    }
+
+    #[test]
+    fn empty_observations_returns_empty() {
+        let points = parse_observations("DGS10", vec![], fixed_ts());
+        assert!(points.is_empty());
+    }
+
+    #[test]
+    fn fetched_at_is_propagated() {
+        let ts = fixed_ts();
+        let points = parse_observations("M2SL", vec![obs("2024-01-02", "1.0")], ts);
+        assert_eq!(points[0].fetched_at, ts);
+    }
 }

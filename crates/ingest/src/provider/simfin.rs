@@ -125,6 +125,7 @@ impl FundamentalsProvider for SimFinConnector {
                 results.push(IncomeStatement {
                     symbol: sym.clone(),
                     period_end,
+                    period_type: "annual".to_string(),
                     revenue,
                     cogs,
                     operating_income: op_income,
@@ -347,4 +348,144 @@ struct Statement {
 struct DataRow {
     concept: Option<String>,
     value: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ── find_value ────────────────────────────────────────────────────────────
+
+    fn row(concept: &str, value: &str) -> DataRow {
+        DataRow {
+            concept: Some(concept.to_string()),
+            value: Some(value.to_string()),
+        }
+    }
+
+    #[test]
+    fn find_value_returns_matching_decimal() {
+        let data = vec![row("Revenue", "60922000000"), row("Net Income", "29760000000")];
+        let v = find_value(&data, "Revenue").unwrap();
+        assert_eq!(v, Decimal::from_str("60922000000").unwrap());
+    }
+
+    #[test]
+    fn find_value_returns_none_when_missing() {
+        let data = vec![row("Revenue", "100")];
+        assert!(find_value(&data, "Operating Income (Loss)").is_none());
+    }
+
+    #[test]
+    fn find_value_returns_none_for_unparseable_number() {
+        let data = vec![DataRow { concept: Some("Revenue".to_string()), value: Some("N/A".to_string()) }];
+        assert!(find_value(&data, "Revenue").is_none());
+    }
+
+    // ── parse_simfin_response ─────────────────────────────────────────────────
+
+    fn minimal_pl_response(ticker: &str, report_date: &str) -> serde_json::Value {
+        json!([{
+            "ticker": ticker,
+            "statements": [{
+                "type": "pl",
+                "period": "FY",
+                "fyear": 2023,
+                "columns": [
+                    "SimFinId", "Ticker", "Fiscal Period", "Fiscal Year",
+                    "Report Date",
+                    "Revenue", "Cost of Revenue", "Operating Income (Loss)",
+                    "Net Income", "Interest Expense, Net",
+                    "Income Tax (Expense) Benefit, Net",
+                    "Earnings Per Share (Diluted)"
+                ],
+                "data": [[
+                    "123456", ticker, "FY", 2023,
+                    report_date,
+                    "60922000000", "16621000000", "32972000000",
+                    "29760000000", "257000000",
+                    "-1041000000",
+                    "11.93"
+                ]]
+            }]
+        }])
+    }
+
+    #[test]
+    fn parses_single_pl_statement() {
+        let raw = minimal_pl_response("NVDA", "2023-12-31");
+        let sets = parse_simfin_response(raw).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].statements.len(), 1);
+        let stmt = &sets[0].statements[0];
+        assert_eq!(stmt.statement_type.as_deref(), Some("pl"));
+        assert_eq!(stmt.period_end_date, "2023-12-31");
+        let rev = find_value(&stmt.data, "Revenue").unwrap();
+        assert_eq!(rev, Decimal::from_str("60922000000").unwrap());
+    }
+
+    #[test]
+    fn parse_multiple_years() {
+        let raw = json!([{
+            "ticker": "AAPL",
+            "statements": [{
+                "type": "pl",
+                "columns": ["Report Date", "Revenue"],
+                "data": [
+                    ["2022-09-24", "394328000000"],
+                    ["2023-09-30", "383285000000"]
+                ]
+            }]
+        }]);
+        let sets = parse_simfin_response(raw).unwrap();
+        assert_eq!(sets[0].statements.len(), 2);
+    }
+
+    #[test]
+    fn non_array_response_returns_empty() {
+        let raw = json!({ "error": "not found" });
+        let sets = parse_simfin_response(raw).unwrap();
+        assert!(sets.is_empty());
+    }
+
+    #[test]
+    fn empty_array_returns_empty() {
+        let sets = parse_simfin_response(json!([])).unwrap();
+        assert!(sets.is_empty());
+    }
+
+    #[test]
+    fn statement_without_statements_key_is_skipped() {
+        // Company entry has no "statements" field.
+        let raw = json!([{ "ticker": "AAPL" }]);
+        let sets = parse_simfin_response(raw).unwrap();
+        assert!(sets.is_empty());
+    }
+
+    #[test]
+    fn income_statements_roundtrip_through_provider() {
+        // Tests the full SimFin income_statements() parsing path (no HTTP).
+        use chrono::NaiveDate;
+        use economind_core::model::Symbol;
+
+        let raw = minimal_pl_response("NVDA", "2023-12-31");
+        let sets = parse_simfin_response(raw).unwrap();
+        let sym = Symbol::new("NVDA");
+        let mut results = Vec::new();
+        for set in sets {
+            for stmt in set.statements {
+                if stmt.statement_type.as_deref() != Some("pl") { continue; }
+                let period_end = NaiveDate::parse_from_str(&stmt.period_end_date, "%Y-%m-%d").unwrap();
+                let revenue = find_value(&stmt.data, "Revenue").unwrap_or(Decimal::ZERO);
+                let eps = find_value(&stmt.data, "Earnings Per Share (Diluted)").unwrap_or(Decimal::ZERO);
+                results.push((sym.clone(), period_end, revenue, eps));
+            }
+        }
+        assert_eq!(results.len(), 1);
+        let (_, date, rev, eps) = &results[0];
+        assert_eq!(*date, NaiveDate::from_ymd_opt(2023, 12, 31).unwrap());
+        assert_eq!(*rev, Decimal::from_str("60922000000").unwrap());
+        assert_eq!(*eps, Decimal::from_str("11.93").unwrap());
+    }
 }

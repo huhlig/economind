@@ -80,6 +80,9 @@ pub trait PortfolioStorage: Send + Sync {
     /// Load the current portfolio state for building StrategyContext.
     async fn load_portfolio_state(&self) -> StorageResult<PortfolioState>;
 
+    /// Fetch a single open position by its UUID. Returns `None` if not found or closed.
+    async fn get_open_position(&self, id: Uuid) -> StorageResult<Option<OpenPosition>>;
+
     /// Open a new long or short position.
     async fn open_position(
         &self,

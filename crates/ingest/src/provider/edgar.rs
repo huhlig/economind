@@ -230,6 +230,7 @@ impl FundamentalsProvider for EdgarConnector {
             stmts.push(IncomeStatement {
                 symbol: sym.clone(),
                 period_end: *period_end,
+                period_type: "annual".to_string(),
                 revenue,
                 cogs: cogs_val,
                 operating_income: *op,
@@ -379,6 +380,125 @@ fn annual_value_map(concept: Option<&XbrlConcept>) -> HashMap<NaiveDate, Decimal
         map.entry(end).or_insert(value);
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_concept(observations: Vec<(&str, f64, &str)>) -> XbrlConcept {
+        // observations: (end_date, value, form)
+        XbrlConcept {
+            units: XbrlUnits {
+                usd: Some(
+                    observations
+                        .into_iter()
+                        .map(|(end, val, form)| XbrlObservation {
+                            end: end.to_string(),
+                            val,
+                            form: Some(form.to_string()),
+                        })
+                        .collect(),
+                ),
+            },
+        }
+    }
+
+    fn gaap(entries: Vec<(&str, XbrlConcept)>) -> HashMap<String, XbrlConcept> {
+        entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    }
+
+    // ── pick_concept ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn pick_concept_returns_first_match() {
+        let g = gaap(vec![
+            ("Revenues", make_concept(vec![])),
+            ("RevenueFromContractWithCustomerExcludingAssessedTax", make_concept(vec![])),
+        ]);
+        let result = pick_concept(&g, &["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"]);
+        assert!(result.is_some());
+        // Should pick "Revenues" since it comes first in the names list.
+    }
+
+    #[test]
+    fn pick_concept_falls_through_to_second() {
+        let g = gaap(vec![("RevenueFromContractWithCustomerExcludingAssessedTax", make_concept(vec![]))]);
+        let result = pick_concept(
+            &g,
+            &["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"],
+        );
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn pick_concept_returns_none_when_absent() {
+        let g = gaap(vec![("SomeOtherConcept", make_concept(vec![]))]);
+        let result = pick_concept(&g, &["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"]);
+        assert!(result.is_none());
+    }
+
+    // ── annual_value_map ──────────────────────────────────────────────────────
+
+    #[test]
+    fn annual_value_map_includes_10k_filings() {
+        let concept = make_concept(vec![
+            ("2022-12-31", 5_000_000_000.0, "10-K"),
+            ("2023-12-31", 6_000_000_000.0, "10-K"),
+        ]);
+        let map = annual_value_map(Some(&concept));
+        assert_eq!(map.len(), 2);
+        let date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+        assert!(map.contains_key(&date));
+    }
+
+    #[test]
+    fn annual_value_map_excludes_non_10k_forms() {
+        let concept = make_concept(vec![
+            ("2023-03-31", 1_000_000_000.0, "10-Q"),
+            ("2023-06-30", 1_100_000_000.0, "10-Q"),
+            ("2023-12-31", 5_000_000_000.0, "10-K"),
+        ]);
+        let map = annual_value_map(Some(&concept));
+        assert_eq!(map.len(), 1, "only the 10-K should be included");
+        let date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+        assert!(map.contains_key(&date));
+    }
+
+    #[test]
+    fn annual_value_map_keeps_first_duplicate_period() {
+        // When two 10-K obs share a period_end, or_insert keeps the first.
+        let concept = make_concept(vec![
+            ("2023-12-31", 5_000_000_000.0, "10-K"),
+            ("2023-12-31", 9_999_999_999.0, "10-K"),
+        ]);
+        let map = annual_value_map(Some(&concept));
+        assert_eq!(map.len(), 1);
+        let val = map[&NaiveDate::from_ymd_opt(2023, 12, 31).unwrap()];
+        assert_eq!(val, Decimal::from_str("5000000000").unwrap());
+    }
+
+    #[test]
+    fn annual_value_map_returns_empty_for_none_concept() {
+        let map = annual_value_map(None);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn annual_value_map_skips_bad_date() {
+        let concept = XbrlConcept {
+            units: XbrlUnits {
+                usd: Some(vec![
+                    XbrlObservation { end: "not-a-date".to_string(), val: 1.0, form: Some("10-K".to_string()) },
+                    XbrlObservation { end: "2023-12-31".to_string(), val: 2.0, form: Some("10-K".to_string()) },
+                ]),
+            },
+        };
+        let map = annual_value_map(Some(&concept));
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key(&NaiveDate::from_ymd_opt(2023, 12, 31).unwrap()));
+    }
 }
 
 // ── Serde types ───────────────────────────────────────────────────────────────

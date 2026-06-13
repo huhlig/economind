@@ -34,6 +34,8 @@ pub struct NewsStory {
 pub struct IncomeStatement {
     pub symbol: Symbol,
     pub period_end: NaiveDate,
+    /// `"annual"` or `"quarterly"`.
+    pub period_type: String,
     pub revenue: Decimal,
     pub cogs: Decimal,
     pub operating_income: Decimal,

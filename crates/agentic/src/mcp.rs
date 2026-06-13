@@ -234,8 +234,11 @@ impl EconomindMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         // Fetch last ~20 bars by scanning a 30-day window.
-        let to = chrono::Utc::now().date_naive();
-        let from = to - chrono::Duration::days(30);
+        // Use tomorrow as the exclusive end so today's bar is included.
+        let to = chrono::Utc::now().date_naive()
+            .succ_opt()
+            .unwrap_or(NaiveDate::MAX);
+        let from = to - chrono::Duration::days(31);
         let bars = collect_bars(&self.store, &sym, from, to, 20)
             .await
             .unwrap_or_default();
@@ -406,8 +409,11 @@ impl EconomindMcpServer {
         let sym = economind_core::model::Symbol::new(&p.symbol);
         let from = NaiveDate::parse_from_str(&p.from, "%Y-%m-%d")
             .map_err(|_| McpError::invalid_params("Invalid from date (use YYYY-MM-DD)", None))?;
+        // Add one day so the user-supplied `to` date is included (query range is exclusive).
         let to = NaiveDate::parse_from_str(&p.to, "%Y-%m-%d")
-            .map_err(|_| McpError::invalid_params("Invalid to date (use YYYY-MM-DD)", None))?;
+            .map_err(|_| McpError::invalid_params("Invalid to date (use YYYY-MM-DD)", None))?
+            .succ_opt()
+            .unwrap_or(NaiveDate::MAX);
         let limit = p.limit.unwrap_or(252);
 
         let bars = collect_bars(&self.store, &sym, from, to, limit)
@@ -492,8 +498,14 @@ impl EconomindMcpServer {
         let symbol = economind_core::model::Symbol::new(&p.symbol);
         let shares = Decimal::from_str(&p.shares)
             .map_err(|_| McpError::invalid_params("Invalid shares value", None))?;
+        if shares.is_zero() {
+            return Err(McpError::invalid_params("shares must be non-zero", None));
+        }
         let entry_price = Decimal::from_str(&p.entry_price)
             .map_err(|_| McpError::invalid_params("Invalid entry_price value", None))?;
+        if entry_price <= Decimal::ZERO {
+            return Err(McpError::invalid_params("entry_price must be positive", None));
+        }
         let entry_at: DateTime<Utc> = p
             .entry_at
             .as_deref()

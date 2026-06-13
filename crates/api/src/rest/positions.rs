@@ -18,6 +18,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use tracing::instrument;
 use chrono::{DateTime, Utc};
 use economind_db::PortfolioStorage;
 use rust_decimal::Decimal;
@@ -91,6 +92,7 @@ pub struct WatchResponse {
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 /// `GET /api/v1/positions`
+#[instrument(skip(state), name = "api.list_open_positions")]
 async fn list_open_positions(State(state): State<AppState>) -> ApiResult<Json<PortfolioSummary>> {
     let portfolio = state
         .store()
@@ -119,6 +121,7 @@ async fn list_open_positions(State(state): State<AppState>) -> ApiResult<Json<Po
 }
 
 /// `POST /api/v1/positions/buy`
+#[instrument(skip(state, req), fields(symbol = req.symbol.as_str()), name = "api.buy_position")]
 async fn buy_position(
     State(state): State<AppState>,
     Json(req): Json<BuyRequest>,
@@ -161,6 +164,7 @@ async fn buy_position(
 }
 
 /// `POST /api/v1/positions/{id}/sell`
+#[instrument(skip(state, req), name = "api.sell_position")]
 async fn sell_position(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -198,20 +202,16 @@ async fn position_history(State(_state): State<AppState>) -> ApiResult<Json<serd
 }
 
 /// `GET /api/v1/positions/{id}`
+#[instrument(skip(state), name = "api.get_position")]
 async fn get_position(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<PositionResponse>> {
-    let portfolio = state
+    let pos = state
         .store()
-        .load_portfolio_state()
+        .get_open_position(id)
         .await
-        .map_err(ApiError::Storage)?;
-
-    let pos = portfolio
-        .open_positions
-        .iter()
-        .find(|p| p.id == id)
+        .map_err(ApiError::Storage)?
         .ok_or(ApiError::NotFound)?;
 
     Ok(Json(PositionResponse {

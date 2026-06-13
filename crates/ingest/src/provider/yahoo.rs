@@ -370,3 +370,92 @@ struct AssetProfile {
 struct SummaryDetail {
     market_cap: Option<f64>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn make_result(
+        timestamps: Vec<i64>,
+        opens: Vec<Option<f64>>,
+        highs: Vec<Option<f64>>,
+        lows: Vec<Option<f64>>,
+        closes: Vec<Option<f64>>,
+        volumes: Vec<Option<i64>>,
+    ) -> ChartResult {
+        ChartResult {
+            timestamp: Some(timestamps),
+            indicators: Indicators {
+                quote: vec![QuoteBlock { open: opens, high: highs, low: lows, close: closes, volume: volumes }],
+                adjclose: None,
+            },
+        }
+    }
+
+    #[test]
+    fn three_valid_bars_parsed() {
+        // 2024-01-02, 2024-01-03, 2024-01-04 (Unix midnight UTC)
+        let result = make_result(
+            vec![1704153600, 1704240000, 1704326400],
+            vec![Some(100.0), Some(102.0), Some(104.0)],
+            vec![Some(105.0), Some(107.0), Some(109.0)],
+            vec![Some(99.0),  Some(101.0), Some(103.0)],
+            vec![Some(103.0), Some(105.0), Some(107.0)],
+            vec![Some(1_000_000), Some(1_100_000), Some(1_200_000)],
+        );
+        let bars = parse_chart_result(result).unwrap();
+        assert_eq!(bars.len(), 3);
+        assert_eq!(bars[0].date, NaiveDate::from_ymd_opt(2024, 1, 2).unwrap());
+        assert_eq!(bars[1].date, NaiveDate::from_ymd_opt(2024, 1, 3).unwrap());
+        assert_eq!(bars[2].volume, 1_200_000);
+    }
+
+    #[test]
+    fn null_bar_is_skipped() {
+        // Second bar has None close — should be skipped.
+        let result = make_result(
+            vec![1704153600, 1704240000, 1704326400],
+            vec![Some(100.0), Some(102.0), Some(104.0)],
+            vec![Some(105.0), Some(107.0), Some(109.0)],
+            vec![Some(99.0),  Some(101.0), Some(103.0)],
+            vec![Some(103.0), None,        Some(107.0)],
+            vec![Some(1_000_000), Some(0), Some(1_200_000)],
+        );
+        let bars = parse_chart_result(result).unwrap();
+        assert_eq!(bars.len(), 2, "middle null bar should be dropped");
+        assert_eq!(bars[0].date, NaiveDate::from_ymd_opt(2024, 1, 2).unwrap());
+        assert_eq!(bars[1].date, NaiveDate::from_ymd_opt(2024, 1, 4).unwrap());
+    }
+
+    #[test]
+    fn empty_timestamps_returns_empty() {
+        let result = make_result(vec![], vec![], vec![], vec![], vec![], vec![]);
+        let bars = parse_chart_result(result).unwrap();
+        assert!(bars.is_empty());
+    }
+
+    #[test]
+    fn missing_volume_defaults_to_zero() {
+        let result = make_result(
+            vec![1704153600],
+            vec![Some(100.0)],
+            vec![Some(105.0)],
+            vec![Some(99.0)],
+            vec![Some(103.0)],
+            vec![None],
+        );
+        let bars = parse_chart_result(result).unwrap();
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0].volume, 0);
+    }
+
+    #[test]
+    fn no_quote_block_returns_error() {
+        let result = ChartResult {
+            timestamp: Some(vec![1704153600]),
+            indicators: Indicators { quote: vec![], adjclose: None },
+        };
+        assert!(parse_chart_result(result).is_err());
+    }
+}

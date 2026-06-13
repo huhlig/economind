@@ -229,6 +229,9 @@ impl PortfolioStorage for DataStore {
     async fn load_portfolio_state(&self) -> StorageResult<PortfolioState> {
         self.duck.load_portfolio_state().await
     }
+    async fn get_open_position(&self, id: Uuid) -> StorageResult<Option<OpenPosition>> {
+        self.duck.get_open_position(id).await
+    }
     async fn open_position(
         &self,
         symbol: &Symbol,
