@@ -164,7 +164,7 @@
       <div class="rounded-xl p-4" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
         <div class="flex items-center justify-between mb-3">
           <span class="text-sm font-medium" style="color: var(--color-text-primary)">Recent Backtests</span>
-          <a href="/backtest" class="text-xs" style="color: var(--color-accent-blue)">View all →</a>
+          <a href="/crates/backtest" class="text-xs" style="color: var(--color-accent-blue)">View all →</a>
         </div>
         {#if recentBacktests.length === 0}
           <p class="text-xs" style="color: var(--color-text-muted)">No backtests run yet.</p>

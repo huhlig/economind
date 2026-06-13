@@ -1,0 +1,37 @@
+[package]
+name = "economind-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "economind"
+path = "src/main.rs"
+
+[dependencies]
+economind-core     = { workspace = true }
+economind-db       = { workspace = true }
+economind-ingest   = { workspace = true }
+economind-strategy = { workspace = true }
+economind-backtest = { workspace = true }
+economind-agentic  = { workspace = true }
+economind-config   = { workspace = true }
+
+# Strategy plugins
+strategy-momentum       = { workspace = true }
+strategy-mean-reversion = { workspace = true }
+strategy-atr-sizer      = { workspace = true }
+
+rust_decimal = { workspace = true }
+
+anyhow              = { workspace = true }
+chrono              = { workspace = true }
+clap                = { workspace = true }
+csv                 = { workspace = true }
+dotenvy             = { workspace = true }
+futures             = { workspace = true }
+serde_json          = { workspace = true }
+thiserror           = { workspace = true }
+tokio               = { workspace = true }
+tracing             = { workspace = true }
+tracing-subscriber  = { workspace = true }
+uuid                = { workspace = true }

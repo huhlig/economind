@@ -1,0 +1,35 @@
+[package]
+name = "economind-agentic"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+economind-core = { workspace = true }
+economind-db = { workspace = true }
+
+# MCP server
+rmcp.workspace = true
+schemars.workspace = true
+
+# Agentic framework
+rig.workspace = true
+
+# HTTP client for LLM backends
+reqwest = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling / utilities
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+rust_decimal = { workspace = true }

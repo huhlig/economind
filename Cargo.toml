@@ -1,15 +1,17 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
-    "core",
-    "db",
-    "indicators",
-    "ingest",
-    "strategy",
-    "backtest",
-    "api",
-    "cli",
-    "agentic",
+    "crates/core",
+    "crates/db",
+    "crates/indicators",
+    "crates/ingest",
+    "crates/strategy",
+    "crates/backtest",
+    "crates/api",
+    "crates/cli",
+    "crates/agentic",
+    "crates/config",
+    "crates/broker",
     "strategies/strategy-momentum",
     "strategies/strategy-regime",
     "strategies/strategy-mean-reversion",
@@ -24,67 +26,73 @@ edition = "2021"
 
 [workspace.dependencies]
 # Internal crates
-economind-core       = { path = "core" }
-economind-db         = { path = "db" }
-economind-indicators = { path = "indicators" }
-economind-ingest     = { path = "ingest" }
-economind-strategy   = { path = "strategy" }
-economind-backtest   = { path = "backtest" }
-economind-api        = { path = "api" }
-economind-agentic    = { path = "agentic" }
+economind-core = { path = "crates/core" }
+economind-db = { path = "crates/db" }
+economind-indicators = { path = "crates/indicators" }
+economind-ingest = { path = "crates/ingest" }
+economind-strategy = { path = "crates/strategy" }
+economind-backtest = { path = "crates/backtest" }
+economind-api = { path = "crates/api" }
+economind-agentic = { path = "crates/agentic" }
+economind-config = { path = "crates/config" }
+economind-broker = { path = "crates/broker" }
 
 # Strategy plugins
-strategy-momentum        = { path = "strategies/strategy-momentum" }
-strategy-regime          = { path = "strategies/strategy-regime" }
-strategy-mean-reversion  = { path = "strategies/strategy-mean-reversion" }
-strategy-trend-follow    = { path = "strategies/strategy-trend-follow" }
-strategy-atr-sizer       = { path = "strategies/strategy-atr-sizer" }
-strategy-kelly-sizer     = { path = "strategies/strategy-kelly-sizer" }
+strategy-momentum = { path = "strategies/strategy-momentum" }
+strategy-regime = { path = "strategies/strategy-regime" }
+strategy-mean-reversion = { path = "strategies/strategy-mean-reversion" }
+strategy-trend-follow = { path = "strategies/strategy-trend-follow" }
+strategy-atr-sizer = { path = "strategies/strategy-atr-sizer" }
+strategy-kelly-sizer = { path = "strategies/strategy-kelly-sizer" }
 
 # Async runtime
-tokio        = { version = "1", features = ["full"] }
-async-trait  = { version = "0.1" }
-futures      = { version = "0.3" }
+tokio = { version = "1", features = ["full"] }
+async-trait = { version = "0.1" }
+futures = { version = "0.3" }
 futures-core = { version = "0.3" }
 
 # HTTP / networking
-reqwest  = { version = "0.12", features = ["json", "cookies", "rustls-tls"] }
+reqwest = { version = "0.13", features = ["json", "cookies", "rustls"] }
 governor = { version = "0.10", features = ["default"] }
 
 # API server
-axum                = { version = "0.8", features = ["ws", "macros"] }
-tower               = { version = "0.5" }
-tower-http          = { version = "0.6", features = ["cors", "trace", "fs"] }
-async-graphql       = { version = "7", features = ["chrono", "uuid"] }
-async-graphql-axum  = { version = "7" }
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower = { version = "0.5" }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+async-graphql = { version = "7", features = ["chrono", "uuid"] }
+async-graphql-axum = { version = "7" }
+rig = { package = "rig-core", version = "0.38", features = ["derive"] }
+rmcp = { version = "1", features = ["server", "transport-async-rw", "macros"] }
+schemars = { version = "1.1" }
+
 
 # Observability
-tracing             = { version = "0.1" }
-tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Database
-duckdb       = { version = "1", features = ["default"] }
-sqlx         = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "rust_decimal", "macros"] }
+duckdb = { version = "1", features = ["default"] }
 rust_decimal = { version = "1", features = ["default"] }
 
 # Serialization
-serde      = { version = "1", features = ["default", "derive"] }
+serde = { version = "1", features = ["default", "derive"] }
 serde_json = { version = "1", features = ["default"] }
-csv        = { version = "1" }
+toml = { version = "1" }
+csv = { version = "1" }
 
 # Date / time
 chrono = { version = "0.4", features = ["default", "serde"] }
 
 # Error handling
 thiserror = { version = "2" }
-anyhow    = { version = "1" }
+anyhow = { version = "1" }
 
 # IDs
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # CLI
-clap     = { version = "4", features = ["derive", "env"] }
-dotenvy  = { version = "0.15" }
+clap = { version = "4", features = ["derive", "env"] }
+dotenvy = { version = "0.15" }
 
 # Misc
 nonzero_ext = "0.3"

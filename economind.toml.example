@@ -1,0 +1,100 @@
+# economind.toml — Platform configuration (non-secret settings only)
+#
+# Copy this file to economind.toml and edit as needed.
+# Secrets (API keys, database passwords) belong in environment variables, never here.
+# Environment variables always take precedence over values in this file.
+#
+# Required env vars (not configurable via TOML):
+#   DATABASE_URL         — PostgreSQL connection string
+#   ECONOMIND_API_KEY    — API key for the REST/WebSocket server
+#   FRED_API_KEY         — FRED economic data API key
+#   SIMFIN_API_KEY       — SimFin fundamentals API key (optional)
+#   ANTHROPIC_API_KEY    — Anthropic Claude API key (optional, for LLM features)
+
+[database]
+# Override via DATABASE_URL env var.
+# url = "postgresql://user:password@localhost:5432/economind"
+
+# DuckDB file for columnar analytics. Use ":memory:" for ephemeral in-process DB.
+# Override via DUCKDB_PATH env var.
+duckdb_path = "economind.duckdb"
+
+[server]
+# Address and port for the REST/GraphQL/WebSocket API.
+# Override via ECONOMIND_BIND env var.
+bind = "0.0.0.0:8080"
+
+# Port for the MCP (Model Context Protocol) server used by Claude integration.
+# Override via ECONOMIND_MCP_PORT env var.
+mcp_port = 8081
+
+[schedule]
+# Set to false to disable the background scheduler entirely (useful for development).
+enabled = true
+
+# UTC time (HH:MM) for nightly bar ingestion (5 PM ET = 22:00 UTC during EST).
+bars_utc = "22:00"
+
+# UTC time (HH:MM) for nightly macro data refresh via FRED.
+macro_utc = "23:00"
+
+# UTC time (HH:MM) for weekly fundamentals refresh (runs every Sunday).
+fundamentals_utc = "23:00"
+
+# UTC time (HH:MM) for nightly strategy run.
+strategy_utc = "23:30"
+
+# Number of calendar days of bars to fetch on each nightly bar ingestion run.
+# Set higher on first run to backfill history.
+bars_lookback_days = 5
+
+[ingest]
+# Maximum concurrent symbol downloads during bar ingestion.
+# Raise if Yahoo rate limits aren't a concern; lower if you see 429 errors.
+bar_concurrency = 4
+
+# How many days back to fetch on initial bar backfill (first time a symbol is added).
+bar_backfill_days = 365
+
+# FRED series IDs to fetch. Leave empty to use the built-in defaults:
+#   FEDFUNDS, DGS10, T10Y2Y, UNRATE, CPIAUCSL, DCOILWTICO, VIXCLS, M2SL
+# Specify here to extend or replace the defaults.
+fred_series = []
+
+[llm]
+# Which LLM provider to use for analysis features.
+# Options: "anthropic" | "local" | "auto"
+# "auto" uses Anthropic if ANTHROPIC_API_KEY is set, falls back to local otherwise.
+provider = "auto"
+
+# Claude model for the Anthropic backend.
+anthropic_model = "claude-haiku-4-5"
+
+# Base URL for a local OpenAI-compatible inference server (e.g., Ollama).
+local_base_url = "http://localhost:11434/v1"
+
+# Model name for the local backend.
+local_model = "llama3"
+
+[risk]
+# Halt all new order execution when portfolio drawdown exceeds this fraction.
+# Example: 0.20 = halt when portfolio is down >20% from equity peak.
+max_drawdown_pct = 0.20
+
+# Maximum fraction of portfolio value any single new position may represent.
+# Example: 0.10 = no single position can exceed 10% of portfolio at entry.
+max_position_pct = 0.10
+
+# Maximum number of concurrent open positions.
+max_open_positions = 20
+
+[notifications]
+# Discord or Slack incoming webhook URL.
+# Leave unset or empty to disable notifications entirely.
+# webhook_url = "https://hooks.slack.com/services/..."
+
+# Which events trigger a notification.
+on_signal       = true   # A strategy emitted a trade signal
+on_run_complete = false  # A strategy run finished (summary)
+on_order        = true   # An order was submitted to the broker
+on_error        = true   # A scheduler or execution error occurred

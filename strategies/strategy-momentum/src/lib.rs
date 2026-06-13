@@ -146,7 +146,11 @@ fn risk_adjusted_momentum(bars: &[DailyCandleEntry]) -> f64 {
         .filter_map(|w| {
             let prev = w[0].close.to_f64()?;
             let curr = w[1].close.to_f64()?;
-            if prev > 0.0 { Some((curr / prev).ln()) } else { None }
+            if prev > 0.0 {
+                Some((curr / prev).ln())
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -221,6 +225,9 @@ mod tests {
         // Constant daily return of 1% → vol = 0.01 * sqrt(252).
         let returns = vec![0.01_f64; 50];
         let vol = annualised_volatility(&returns);
-        assert!(vol < 1e-10, "Constant returns should give near-zero vol: {vol}");
+        assert!(
+            vol < 1e-10,
+            "Constant returns should give near-zero vol: {vol}"
+        );
     }
 }

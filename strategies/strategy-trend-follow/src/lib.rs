@@ -31,7 +31,7 @@
 //! | `long_only`      | `true`  | Emit only Long signals                       |
 
 use async_trait::async_trait;
-use economind_strategy::{Candidate, StrategyContext, TimingSignal, Timer, TradeDirection};
+use economind_strategy::{Candidate, StrategyContext, Timer, TimingSignal, TradeDirection};
 use rust_decimal::prelude::*;
 use std::collections::HashMap;
 
@@ -134,7 +134,11 @@ impl Timer for TrendFollowTimer {
 
         let spread_std = std_dev(&recent_spreads);
         let ema_score = if spread_std < 1e-12 {
-            if spread > 0.0 { 1.0 } else { 0.0 }
+            if spread > 0.0 {
+                1.0
+            } else {
+                0.0
+            }
         } else {
             // Normalise spread to a score: z-score clamped to [0, 3] then / 3.
             let z = spread / spread_std;
@@ -218,8 +222,16 @@ fn adx(highs: &[f64], lows: &[f64], closes: &[f64], period: usize) -> f64 {
 
         let up_move = h - prev_h;
         let down_move = prev_l - l;
-        plus_dm.push(if up_move > down_move && up_move > 0.0 { up_move } else { 0.0 });
-        minus_dm.push(if down_move > up_move && down_move > 0.0 { down_move } else { 0.0 });
+        plus_dm.push(if up_move > down_move && up_move > 0.0 {
+            up_move
+        } else {
+            0.0
+        });
+        minus_dm.push(if down_move > up_move && down_move > 0.0 {
+            down_move
+        } else {
+            0.0
+        });
     }
 
     // Wilder smoothing (alpha = 1/period).
@@ -322,7 +334,10 @@ mod tests {
         let highs: Vec<f64> = closes.iter().map(|c| c + 0.5).collect();
         let lows: Vec<f64> = closes.iter().map(|c| c - 0.5).collect();
         let result = adx(&highs, &lows, &closes, 14);
-        assert!(result > 20.0, "Expected high ADX in trending market, got {result:.1}");
+        assert!(
+            result > 20.0,
+            "Expected high ADX in trending market, got {result:.1}"
+        );
     }
 
     #[test]
@@ -335,7 +350,11 @@ mod tests {
     fn test_std_dev_known_values() {
         // Population std dev of [2, 4, 4, 4, 5, 5, 7, 9] = 2.0
         let vals = vec![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
-        assert!((std_dev(&vals) - 2.0).abs() < 1e-9, "std_dev={}", std_dev(&vals));
+        assert!(
+            (std_dev(&vals) - 2.0).abs() < 1e-9,
+            "std_dev={}",
+            std_dev(&vals)
+        );
     }
 
     #[test]
@@ -348,7 +367,10 @@ mod tests {
         // EMA with period=3: seed = mean of first 3 values = (1+2+3)/3 = 2.0
         let prices = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let result = ema(&prices, 3);
-        assert!((result[0] - 2.0).abs() < 1e-9, "first EMA value should be SMA seed");
+        assert!(
+            (result[0] - 2.0).abs() < 1e-9,
+            "first EMA value should be SMA seed"
+        );
     }
 
     #[test]

@@ -30,7 +30,7 @@
 //! The `direction` is always `Long` (mean-reversion timer assumes buy-the-dip).
 
 use async_trait::async_trait;
-use economind_strategy::{Candidate, StrategyContext, TimingSignal, Timer, TradeDirection};
+use economind_strategy::{Candidate, StrategyContext, Timer, TimingSignal, TradeDirection};
 use rust_decimal::prelude::*;
 use std::collections::HashMap;
 
@@ -81,14 +81,19 @@ impl Timer for MeanReversionTimer {
         };
 
         let bars = match ctx.bars.get(&candidate.symbol) {
-            Some(b) if b.len() >= self.bb_period.max(self.rsi_period + 1).max(self.zscore_window) => b,
+            Some(b)
+                if b.len()
+                    >= self
+                        .bb_period
+                        .max(self.rsi_period + 1)
+                        .max(self.zscore_window) =>
+            {
+                b
+            }
             _ => return no_signal("Insufficient bar history"),
         };
 
-        let closes: Vec<f64> = bars
-            .iter()
-            .filter_map(|b| b.close.to_f64())
-            .collect();
+        let closes: Vec<f64> = bars.iter().filter_map(|b| b.close.to_f64()).collect();
 
         if closes.is_empty() {
             return no_signal("No close prices available");
@@ -227,7 +232,10 @@ mod tests {
         let mut closes: Vec<f64> = vec![100.0; 20];
         closes.push(80.0); // well below lower band
         let score = bollinger_score(&closes, 20, 2.0);
-        assert!(score > 0.8, "Expected high BB score for oversold price: {score}");
+        assert!(
+            score > 0.8,
+            "Expected high BB score for oversold price: {score}"
+        );
     }
 
     #[test]
@@ -235,7 +243,10 @@ mod tests {
         let mut closes: Vec<f64> = vec![100.0; 20];
         closes.push(120.0); // well above upper band
         let score = bollinger_score(&closes, 20, 2.0);
-        assert!(score < 0.2, "Expected low BB score for overbought price: {score}");
+        assert!(
+            score < 0.2,
+            "Expected low BB score for overbought price: {score}"
+        );
     }
 
     #[test]
@@ -255,7 +266,10 @@ mod tests {
         let rsi = compute_rsi(&closes, 14);
         assert!(rsi > 70.0, "Expected overbought RSI, got {rsi}");
         let score = rsi_score(&closes, 14);
-        assert!(score < 0.2, "Expected low RSI score for overbought: {score}");
+        assert!(
+            score < 0.2,
+            "Expected low RSI score for overbought: {score}"
+        );
     }
 
     #[test]
@@ -263,7 +277,10 @@ mod tests {
         let mut closes = vec![100.0_f64; 19];
         closes.push(90.0); // below mean
         let score = zscore_score(&closes, 20);
-        assert!(score > 0.5, "Expected high z-score for price below mean: {score}");
+        assert!(
+            score > 0.5,
+            "Expected high z-score for price below mean: {score}"
+        );
     }
 
     #[test]

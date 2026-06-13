@@ -168,8 +168,7 @@ mod tests {
     fn make_bar(i: usize, open: f64, high: f64, low: f64, close: f64) -> DailyCandleEntry {
         let to_dec = |v: f64| Decimal::try_from(v).unwrap();
         DailyCandleEntry {
-            date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
-                + chrono::Duration::days(i as i64),
+            date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap() + chrono::Duration::days(i as i64),
             open: to_dec(open),
             high: to_dec(high),
             low: to_dec(low),
@@ -181,8 +180,9 @@ mod tests {
     #[test]
     fn test_atr_flat_price() {
         // All bars with same OHLC → true range per bar is 0.
-        let bars: Vec<DailyCandleEntry> =
-            (0..20).map(|i| make_bar(i, 100.0, 101.0, 99.0, 100.0)).collect();
+        let bars: Vec<DailyCandleEntry> = (0..20)
+            .map(|i| make_bar(i, 100.0, 101.0, 99.0, 100.0))
+            .collect();
         let atr = compute_atr(&bars, 14);
         // TR = high - low = 2.0 for every bar.
         assert!((atr - 2.0).abs() < 0.01, "Expected ATR ≈ 2.0, got {atr}");
@@ -203,8 +203,9 @@ mod tests {
 
     #[test]
     fn test_atr_not_enough_bars() {
-        let bars: Vec<DailyCandleEntry> =
-            (0..5).map(|i| make_bar(i, 100.0, 101.0, 99.0, 100.0)).collect();
+        let bars: Vec<DailyCandleEntry> = (0..5)
+            .map(|i| make_bar(i, 100.0, 101.0, 99.0, 100.0))
+            .collect();
         let atr = compute_atr(&bars, 14);
         assert_eq!(atr, 0.0, "Not enough bars should return 0.0");
     }
@@ -215,8 +216,9 @@ mod tests {
         // dollar_risk = 1000, position_value = 1000 * (100/2) = 50_000,
         // max_value = 5% * 100_000 = 5_000 → capped at 5_000.
         // shares = 5000 / 100 = 50.
-        let bars: Vec<DailyCandleEntry> =
-            (0..20).map(|i| make_bar(i, 100.0, 101.0, 99.0, 100.0)).collect();
+        let bars: Vec<DailyCandleEntry> = (0..20)
+            .map(|i| make_bar(i, 100.0, 101.0, 99.0, 100.0))
+            .collect();
 
         // Build a minimal context using rust_decimal.
         use economind_core::model::Symbol;

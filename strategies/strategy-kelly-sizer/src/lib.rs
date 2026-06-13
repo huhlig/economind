@@ -284,7 +284,10 @@ impl KellyStats {
     /// Inject these stats as string parameters into a parameter map, so they
     /// can be read back by `KellySizer` via `ctx.parameters`.
     pub fn inject_into_params(&self, params: &mut HashMap<String, String>) {
-        params.insert("kelly_trade_count".to_string(), self.trade_count.to_string());
+        params.insert(
+            "kelly_trade_count".to_string(),
+            self.trade_count.to_string(),
+        );
         params.insert("kelly_win_rate".to_string(), self.win_rate.to_string());
         params.insert("kelly_avg_win".to_string(), self.avg_win.to_string());
         params.insert("kelly_avg_loss".to_string(), self.avg_loss.to_string());
