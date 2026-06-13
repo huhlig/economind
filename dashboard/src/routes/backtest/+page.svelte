@@ -73,9 +73,29 @@
     chartInstance.timeScale().fitContent();
   }
 
+  function validateStrategy(id: string): string | null {
+    const cfg = strategies.find(s => s.id === id);
+    if (!cfg) return 'Strategy not found.';
+    const roles = cfg.plugins.map(p => p.role.toLowerCase());
+    const missing: string[] = [];
+    if (!roles.includes('identifier')) missing.push('Identifier');
+    if (!roles.includes('timer')) missing.push('Timer');
+    if (!roles.includes('sizer')) missing.push('Sizer');
+    if (missing.length) {
+      return `Strategy is missing required plugins: ${missing.join(', ')}. Add them in the strategy editor before running a backtest.`;
+    }
+    return null;
+  }
+
   async function submitBacktest() {
     if (!formStrategyId) return;
+    const validationError = validateStrategy(formStrategyId);
+    if (validationError) {
+      error = validationError;
+      return;
+    }
     submitting = true;
+    error = null;
     try {
       const run = await backtest.run({
         config_id: formStrategyId,
@@ -86,7 +106,14 @@
       runs = [run, ...runs];
       await selectRun(run);
     } catch (e) {
-      alert('Backtest failed: ' + String(e));
+      const msg = String(e);
+      // Parse JSON error body if present
+      try {
+        const parsed = JSON.parse(msg.includes('{') ? msg.slice(msg.indexOf('{')) : '{}');
+        error = parsed.error ?? msg;
+      } catch {
+        error = msg;
+      }
     } finally {
       submitting = false;
     }
@@ -110,8 +137,12 @@
 
   {#if loading}
     <div style="color: var(--color-text-muted)">Loading…</div>
-  {:else if error}
-    <div class="text-sm mb-4" style="color: var(--color-accent-red)">{error}</div>
+  {/if}
+  {#if error}
+    <div class="text-sm mb-4 rounded-lg px-3 py-2" style="color: var(--color-accent-red); background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);">
+      {error}
+      <button onclick={() => (error = null)} class="ml-2 opacity-60 hover:opacity-100">✕</button>
+    </div>
   {/if}
 
   <div class="grid grid-cols-3 gap-6">

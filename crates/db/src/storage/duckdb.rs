@@ -38,6 +38,35 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+// ── Catalog types ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, serde::Serialize)]
+pub struct SymbolCoverage {
+    pub symbol: String,
+    pub name: String,
+    pub sector: String,
+    pub bar_count: i64,
+    pub first_bar: Option<String>,
+    pub last_bar: Option<String>,
+    pub income_count: i64,
+    pub balance_count: i64,
+    pub cashflow_count: i64,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct MacroEntry {
+    pub series_id: String,
+    pub count: i64,
+    pub first_date: Option<String>,
+    pub last_date: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct DataCatalog {
+    pub symbols: Vec<SymbolCoverage>,
+    pub macro_series: Vec<MacroEntry>,
+}
+
 // ── DuckDatabase ─────────────────────────────────────────────────────────────
 
 /// DuckDB-backed storage for the entire Economind platform.
@@ -129,6 +158,71 @@ impl DuckDatabase {
                 params![key, value, Utc::now().to_rfc3339()],
             )?;
             Ok(())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
+    /// Query per-symbol data coverage and macro series inventory.
+    pub async fn query_catalog(&self) -> StorageResult<DataCatalog> {
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || -> StorageResult<DataCatalog> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT
+                    i.symbol,
+                    COALESCE(i.name, '') AS name,
+                    COALESCE(i.sector, '') AS sector,
+                    COUNT(b.time) AS bar_count,
+                    MIN(b.time::DATE)::TEXT AS first_bar,
+                    MAX(b.time::DATE)::TEXT AS last_bar,
+                    COALESCE((SELECT COUNT(*) FROM income_statements WHERE symbol = i.symbol), 0) AS income_count,
+                    COALESCE((SELECT COUNT(*) FROM balance_sheets WHERE symbol = i.symbol), 0) AS balance_count,
+                    COALESCE((SELECT COUNT(*) FROM cash_flow_statements WHERE symbol = i.symbol), 0) AS cashflow_count
+                FROM instruments i
+                LEFT JOIN bars b ON b.symbol = i.symbol AND b.interval = '1d'
+                GROUP BY i.symbol, i.name, i.sector
+                ORDER BY i.symbol
+                "#,
+            )?;
+
+            let symbols: Vec<SymbolCoverage> = stmt
+                .query_map([], |row| {
+                    Ok(SymbolCoverage {
+                        symbol: row.get(0)?,
+                        name: row.get(1)?,
+                        sector: row.get(2)?,
+                        bar_count: row.get(3)?,
+                        first_bar: row.get(4)?,
+                        last_bar: row.get(5)?,
+                        income_count: row.get(6)?,
+                        balance_count: row.get(7)?,
+                        cashflow_count: row.get(8)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            let mut stmt2 = conn.prepare(
+                "SELECT series_id, COUNT(*) AS cnt, MIN(date)::TEXT AS first_date, MAX(date)::TEXT AS last_date \
+                 FROM macro_series GROUP BY series_id ORDER BY series_id",
+            )?;
+
+            let macro_series: Vec<MacroEntry> = stmt2
+                .query_map([], |row| {
+                    Ok(MacroEntry {
+                        series_id: row.get(0)?,
+                        count: row.get(1)?,
+                        first_date: row.get(2)?,
+                        last_date: row.get(3)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(DataCatalog { symbols, macro_series })
         })
         .await
         .map_err(|e| StorageError::Provider(e.to_string()))?
@@ -1301,6 +1395,24 @@ impl PortfolioStorage for DuckDatabase {
         .map_err(|e| StorageError::Provider(e.to_string()))?
     }
 
+    async fn set_cash(&self, cash: Decimal) -> StorageResult<()> {
+        let conn = self.conn.clone();
+        let cash_f = d2f(cash);
+        let today = Utc::now().date_naive().to_string();
+        tokio::task::spawn_blocking(move || -> StorageResult<()> {
+            let conn = conn.lock().map_err(|e| StorageError::Provider(e.to_string()))?;
+            conn.execute(
+                "INSERT INTO portfolio_equity (date, portfolio_value, cash, peak_value) \
+                 VALUES (?, 0.0, ?, 0.0) \
+                 ON CONFLICT (date) DO UPDATE SET cash=EXCLUDED.cash",
+                params![today, cash_f],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| StorageError::Provider(e.to_string()))?
+    }
+
     async fn add_watch(&self, symbol: &Symbol) -> StorageResult<WatchItem> {
         let conn = self.conn.clone();
         let sym = symbol.as_str().to_string();
@@ -1429,17 +1541,16 @@ impl StrategyStorage for DuckDatabase {
 
     async fn get_strategy_config(&self, id: Uuid) -> StorageResult<Option<StrategyConfigRow>> {
         let conn = self.conn.clone();
-        let table = self.t_strategy_configs();
         let id_str = id.to_string();
         tokio::task::spawn_blocking(move || -> StorageResult<Option<StrategyConfigRow>> {
             let conn = conn
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
-            let mut stmt = conn.prepare(&format!(
+            let mut stmt = conn.prepare(
                 "SELECT id, name, description, composition, plugins_json, parameters_json, \
                         enabled, auto_execute, execution_mode, version, created_at::VARCHAR, updated_at::VARCHAR \
-                 FROM {table} WHERE id=?"
-            ))?;
+                 FROM strategy_configs WHERE id=?"
+            )?;
             Ok(stmt
                 .query_map([&id_str], duck_row_to_strategy_config)?
                 .filter_map(|r| r.ok())
@@ -1451,16 +1562,15 @@ impl StrategyStorage for DuckDatabase {
 
     async fn list_strategy_configs(&self) -> StorageResult<Vec<StrategyConfigRow>> {
         let conn = self.conn.clone();
-        let table = self.t_strategy_configs();
         tokio::task::spawn_blocking(move || -> StorageResult<Vec<StrategyConfigRow>> {
             let conn = conn
                 .lock()
                 .map_err(|e| StorageError::Provider(e.to_string()))?;
-            let mut stmt = conn.prepare(&format!(
+            let mut stmt = conn.prepare(
                 "SELECT id, name, description, composition, plugins_json, parameters_json, \
                         enabled, auto_execute, execution_mode, version, created_at::VARCHAR, updated_at::VARCHAR \
-                 FROM {table} ORDER BY name"
-            ))?;
+                 FROM strategy_configs ORDER BY name"
+            )?;
             Ok(stmt
                 .query_map([], duck_row_to_strategy_config)?
                 .filter_map(|r| r.ok())

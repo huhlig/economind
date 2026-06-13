@@ -15,7 +15,7 @@
     { href: '/portfolio',   label: 'Portfolio',        icon: '◈' },
     { href: '/strategies',  label: 'Strategies',       icon: '⟳' },
     { href: '/backtest',    label: 'Backtest',         icon: '◷' },
-    { href: '/data',        label: 'Data Explorer',    icon: '≋' },
+    { href: '/data',        label: 'Data',             icon: '≋' },
     { href: '/settings',    label: 'Settings',         icon: '⚙' },
   ];
 

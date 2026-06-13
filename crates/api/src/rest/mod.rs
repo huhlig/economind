@@ -10,6 +10,7 @@ mod data;
 mod datafeed;
 mod instruments;
 mod positions;
+mod scheduler;
 mod settings;
 mod signals;
 mod strategy;
@@ -30,4 +31,5 @@ pub fn router() -> Router<AppState> {
         .merge(chat::router())
         .merge(data::router())
         .merge(datafeed::router())
+        .merge(scheduler::router())
 }

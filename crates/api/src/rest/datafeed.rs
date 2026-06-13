@@ -12,6 +12,8 @@ use axum::{
 use economind_ingest::{RReichelFeed, TiingoFeed};
 use serde::Serialize;
 
+use tracing::info;
+
 use crate::{
     error::{ApiError, ApiResult},
     state::AppState,
@@ -37,10 +39,12 @@ pub struct DatafeedFetchResponse {
 }
 
 async fn fetch_rreichel(State(state): State<AppState>) -> ApiResult<Json<DatafeedFetchResponse>> {
+    info!("Datafeed: fetching RReichel ticker universe");
     let feed = RReichelFeed::new(state.store().duck().clone());
     feed.upsert_tickers()
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    info!("Datafeed: RReichel fetch completed");
 
     Ok(Json(DatafeedFetchResponse {
         status: "completed".to_string(),
@@ -55,10 +59,12 @@ async fn fetch_tiingo_metadata(
     State(state): State<AppState>,
     Path(ticker): Path<String>,
 ) -> ApiResult<Json<DatafeedFetchResponse>> {
+    info!("Datafeed: fetching Tiingo metadata for {ticker}");
     let feed = tiingo_feed(state.store().duck().clone())?;
     feed.fetch_ticker_metadata(&ticker)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    info!("Datafeed: Tiingo metadata fetch completed for {ticker}");
 
     Ok(Json(DatafeedFetchResponse {
         status: "completed".to_string(),
@@ -73,10 +79,12 @@ async fn fetch_tiingo_prices(
     State(state): State<AppState>,
     Path(ticker): Path<String>,
 ) -> ApiResult<Json<DatafeedFetchResponse>> {
+    info!("Datafeed: fetching Tiingo prices for {ticker}");
     let feed = tiingo_feed(state.store().duck().clone())?;
     feed.fetch_ticker_prices(&ticker, None)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    info!("Datafeed: Tiingo prices fetch completed for {ticker}");
 
     Ok(Json(DatafeedFetchResponse {
         status: "completed".to_string(),

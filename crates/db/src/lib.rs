@@ -10,7 +10,8 @@ pub use self::datastore::DataStore;
 pub use self::error::*;
 pub use self::storage::{
     BacktestRunRow, BacktestStorage, BacktestTradeRow, CandleStorage, ChatMessageRow,
-    ChatSessionRow, ChatStorage, DuckDatabase, EquityCurvePoint, MacroSeriesPoint, MacroStorage,
-    MetadataStorage, OpenPosition, PortfolioState, PortfolioStorage, StrategyConfigRow,
-    StrategyRunRow, StrategySignalRow, StrategyStorage, TickStorage, TickerQuery, WatchItem,
+    ChatSessionRow, ChatStorage, DataCatalog, DuckDatabase, EquityCurvePoint, MacroEntry,
+    MacroSeriesPoint, MacroStorage, MetadataStorage, OpenPosition, PortfolioState, PortfolioStorage,
+    StrategyConfigRow, StrategyRunRow, StrategySignalRow, StrategyStorage, SymbolCoverage,
+    TickStorage, TickerQuery, WatchItem,
 };

@@ -141,6 +141,23 @@
     bars_lookback_days: 5,
   });
 
+  // Manual trigger state
+  type TriggerJob = 'bars' | 'macro' | 'fundamentals';
+  let triggerRunning = $state<TriggerJob | null>(null);
+  let triggerResult = $state<{ job: string; status: string; summary: string } | null>(null);
+
+  async function runNow(job: TriggerJob) {
+    triggerRunning = job;
+    triggerResult = null;
+    try {
+      triggerResult = await settings.triggerJob(job);
+    } catch (e) {
+      triggerResult = { job, status: 'error', summary: String(e) };
+    } finally {
+      triggerRunning = null;
+    }
+  }
+
   async function loadScheduleSettings() {
     schedLoading = true; schedError = null;
     try { sched = await settings.schedule(); }
@@ -453,6 +470,29 @@
           {schedSaving ? 'Saving...' : 'Save Schedule'}
         </button>
         {#if schedSaved}<span class="text-sm" style="color: var(--color-accent-green)">Saved ✓</span>{/if}
+      </div>
+
+      <!-- Manual triggers -->
+      <div style="border-top: 1px solid var(--color-border); padding-top: 1rem;">
+        <div class="text-xs mb-3 font-medium" style="color: var(--color-text-muted)">Run now (bypasses schedule)</div>
+        <div class="flex flex-wrap gap-2">
+          {#each (['bars', 'macro', 'fundamentals'] as const) as job}
+            <button
+              onclick={() => runNow(job)}
+              disabled={triggerRunning !== null}
+              class="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: var(--color-text-secondary); opacity: {triggerRunning !== null ? 0.5 : 1};"
+            >
+              {triggerRunning === job ? 'Running…' : `▶ ${job}`}
+            </button>
+          {/each}
+        </div>
+        {#if triggerResult}
+          <div class="mt-3 rounded-lg px-3 py-2 text-xs font-mono"
+            style="background: var(--color-bg-secondary); border: 1px solid var(--color-border); color: {triggerResult.status === 'error' ? 'var(--color-accent-red)' : 'var(--color-accent-green)'};">
+            [{triggerResult.job}] {triggerResult.status}: {triggerResult.summary}
+          </div>
+        {/if}
       </div>
     {/if}
   </div>

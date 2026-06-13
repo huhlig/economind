@@ -15,7 +15,7 @@
 
 use axum::{
     extract::{Path, State},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use tracing::instrument;
@@ -34,6 +34,7 @@ use crate::{
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/positions", get(list_open_positions))
+        .route("/positions/cash", put(set_cash))
         .route("/positions/buy", post(buy_position))
         .route("/positions/history", get(position_history))
         .route("/positions/{id}", get(get_position))
@@ -79,6 +80,11 @@ pub struct SellRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SetCashRequest {
+    pub cash: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct AddWatchRequest {
     pub symbol: String,
 }
@@ -112,6 +118,37 @@ async fn list_open_positions(State(state): State<AppState>) -> ApiResult<Json<Po
         })
         .collect();
 
+    Ok(Json(PortfolioSummary {
+        portfolio_value: portfolio.portfolio_value.to_string(),
+        available_cash: portfolio.available_cash.to_string(),
+        current_drawdown: portfolio.current_drawdown.to_string(),
+        open_positions: positions,
+    }))
+}
+
+/// `PUT /api/v1/positions/cash`
+async fn set_cash(
+    State(state): State<AppState>,
+    Json(req): Json<SetCashRequest>,
+) -> ApiResult<Json<PortfolioSummary>> {
+    let cash = Decimal::from_str(&req.cash)
+        .map_err(|_| ApiError::BadRequest("Invalid cash value".to_string()))?;
+    if cash < Decimal::ZERO {
+        return Err(ApiError::BadRequest("cash must be non-negative".to_string()));
+    }
+    state.store().set_cash(cash).await.map_err(ApiError::Storage)?;
+    let portfolio = state.store().load_portfolio_state().await.map_err(ApiError::Storage)?;
+    let positions = portfolio
+        .open_positions
+        .iter()
+        .map(|p| PositionResponse {
+            id: p.id,
+            symbol: p.symbol.as_str().to_string(),
+            shares: p.shares.to_string(),
+            entry_price: p.entry_price.to_string(),
+            entry_at: p.entry_at.to_rfc3339(),
+        })
+        .collect();
     Ok(Json(PortfolioSummary {
         portfolio_value: portfolio.portfolio_value.to_string(),
         available_cash: portfolio.available_cash.to_string(),

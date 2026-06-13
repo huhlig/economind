@@ -23,6 +23,8 @@ use economind_ingest::{
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
+use tracing::info;
+
 use crate::{
     error::{ApiError, ApiResult},
     state::AppState,
@@ -30,6 +32,7 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/data/catalog", get(get_catalog))
         .route("/data/bars", get(get_bars))
         .route("/data/fundamentals", get(get_fundamentals))
         .route("/data/macro", get(get_macro))
@@ -95,6 +98,15 @@ fn default_concurrency() -> usize {
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
+
+/// `GET /api/v1/data/catalog` — per-symbol data coverage + macro series inventory
+async fn get_catalog(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+    let catalog = state.store().catalog().await.map_err(ApiError::Storage)?;
+    Ok(Json(serde_json::json!({
+        "symbols": catalog.symbols,
+        "macro_series": catalog.macro_series,
+    })))
+}
 
 /// `GET /api/v1/data/bars?symbol=AAPL&from=2024-01-01&to=2024-12-31`
 async fn get_bars(
@@ -220,9 +232,11 @@ async fn ingest_bars(
     State(state): State<AppState>,
     Json(req): Json<IngestBarsRequest>,
 ) -> ApiResult<Json<IngestResponse>> {
+    info!(since=?req.since, concurrency=%req.concurrency, "Ingest: starting bar ingestion");
     let yahoo = YahooFinanceConnector::new().with_concurrency(req.concurrency);
     let manager = DataFeedManager::new(DataFeedManagerConfig::default()).with_yahoo(yahoo);
     let result = manager.run_bars(state.store(), req.since).await;
+    info!(ok=%result.symbols_ok, err=%result.symbols_err, "Ingest: bar ingestion complete");
 
     if result.symbols_err > 0 && result.symbols_ok == 0 {
         return Err(ApiError::Internal(format!("{result}")));
@@ -239,6 +253,7 @@ async fn ingest_macro(
     State(state): State<AppState>,
     Json(req): Json<IngestMacroRequest>,
 ) -> ApiResult<Json<IngestResponse>> {
+    info!(since=?req.since, "Ingest: starting macro ingestion");
     let fred = FredConnector::from_env()
         .map_err(|e| ApiError::BadRequest(format!("FRED connector unavailable: {e}")))?;
     let manager = DataFeedManager::new(DataFeedManagerConfig {
@@ -247,6 +262,7 @@ async fn ingest_macro(
     })
     .with_fred(fred);
     let result = manager.run_macro(state.store(), req.since).await;
+    info!(ok=%result.symbols_ok, err=%result.symbols_err, "Ingest: macro ingestion complete");
 
     if result.symbols_err > 0 && result.symbols_ok == 0 {
         return Err(ApiError::Internal(format!("{result}")));
@@ -263,6 +279,7 @@ async fn ingest_fundamentals(
     State(state): State<AppState>,
     Json(req): Json<IngestFundamentalsRequest>,
 ) -> ApiResult<Json<IngestResponse>> {
+    info!(edgar_only=%req.edgar_only, simfin_only=%req.simfin_only, "Ingest: starting fundamentals ingestion");
     let mut manager = DataFeedManager::new(DataFeedManagerConfig::default());
 
     if !req.simfin_only {
@@ -284,6 +301,7 @@ async fn ingest_fundamentals(
     }
 
     let result = manager.run_fundamentals(state.store()).await;
+    info!(ok=%result.symbols_ok, err=%result.symbols_err, "Ingest: fundamentals ingestion complete");
     if result.symbols_err > 0 && result.symbols_ok == 0 {
         return Err(ApiError::Internal(format!("{result}")));
     }

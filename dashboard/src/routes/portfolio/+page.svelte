@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { portfolio, data as dataApi } from '$lib/api.js';
+  import { portfolio, data as dataApi, instruments } from '$lib/api.js';
   import type { PortfolioSummary, WatchItem } from '$lib/api.js';
   import { eventLog } from '$lib/stores/events.js';
+  import { pageContext } from '$lib/stores/pageContext.js';
 
   interface WatchItemEnriched extends WatchItem {
     last_price?: number;
@@ -33,6 +34,32 @@
   let sellDate = $state(new Date().toISOString().slice(0, 16));
   let sellError = $state<string | null>(null);
   let sellLoading = $state(false);
+
+  // ── Cash modal ─────────────────────────────────────────────────────────────
+  let showCash = $state(false);
+  let cashAmount = $state('');
+  let cashError = $state<string | null>(null);
+  let cashLoading = $state(false);
+
+  function openCashModal() {
+    cashAmount = data ? String(data.cash) : '';
+    cashError = null;
+    showCash = true;
+  }
+
+  async function submitCash() {
+    cashError = null;
+    cashLoading = true;
+    try {
+      await portfolio.setCash(String(cashAmount).trim());
+      showCash = false;
+      await load();
+    } catch (e) {
+      cashError = String(e);
+    } finally {
+      cashLoading = false;
+    }
+  }
 
   // ── Watch add ──────────────────────────────────────────────────────────────
   let watchSymbol = $state('');
@@ -78,6 +105,20 @@
     }
   });
 
+  $effect(() => {
+    if (data) {
+      pageContext.set(
+        `[Portfolio screen]\n` +
+        `- Cash: $${fmt(data.cash)}\n` +
+        `- Total Equity: $${fmt(data.total_equity)}\n` +
+        `- Unrealized P&L: ${data.unrealized_pnl >= 0 ? '+' : ''}$${fmt(Math.abs(data.unrealized_pnl))}\n` +
+        `- Open Positions (${data.positions.length}): ${data.positions.map(p => `${p.symbol} ${p.quantity}sh @ $${fmt(p.average_cost)}`).join(', ') || 'none'}\n` +
+        `- Watchlist (${watches.length} symbols): ${watches.map(w => w.symbol).join(', ') || 'none'}`
+      );
+    }
+    return () => pageContext.set('');
+  });
+
   function fmt(n: number, d = 2) {
     return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   }
@@ -107,13 +148,17 @@
   async function submitBuy() {
     buyError = null;
     buyLoading = true;
+    const sym = String(buySymbol).trim().toUpperCase();
     try {
-      await portfolio.buy({
-        symbol: String(buySymbol).trim().toUpperCase(),
-        shares: String(buyShares).trim(),
-        entry_price: String(buyPrice).trim(),
-        entry_at: buyDate ? new Date(buyDate).toISOString() : undefined,
-      });
+      await Promise.all([
+        portfolio.buy({
+          symbol: sym,
+          shares: String(buyShares).trim(),
+          entry_price: String(buyPrice).trim(),
+          entry_at: buyDate ? new Date(buyDate).toISOString() : undefined,
+        }),
+        instruments.add(sym),
+      ]);
       showBuy = false;
       await load();
     } catch (e) {
@@ -145,7 +190,7 @@
     const sym = watchSymbol.trim().toUpperCase();
     if (!sym) return;
     try {
-      const item = await portfolio.addWatch(sym);
+      const [item] = await Promise.all([portfolio.addWatch(sym), instruments.add(sym)]);
       watches = [item, ...watches.filter(w => w.symbol !== sym)];
       watchSymbol = '';
       // Enrich the newly added symbol
@@ -190,18 +235,26 @@
   {:else if data}
     <!-- Summary KPIs -->
     <div class="grid grid-cols-3 gap-4 mb-8">
-      {#each [
-        { label: 'Total Equity', value: '$' + fmt(data.total_equity) },
-        { label: 'Cash', value: '$' + fmt(data.cash) },
-        { label: 'Unrealized P&L', value: (data.unrealized_pnl >= 0 ? '+$' : '-$') + fmt(Math.abs(data.unrealized_pnl)), color: pnlColor(data.unrealized_pnl) },
-      ] as card}
-        <div class="rounded-xl p-4" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
-          <div class="text-xs mb-1" style="color: var(--color-text-muted)">{card.label}</div>
-          <div class="text-xl font-semibold" style="color: {card.color ?? 'var(--color-text-primary)'}">
-            {card.value}
-          </div>
+      <div class="rounded-xl p-4" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
+        <div class="text-xs mb-1" style="color: var(--color-text-muted)">Total Equity</div>
+        <div class="text-xl font-semibold" style="color: var(--color-text-primary)">${fmt(data.total_equity)}</div>
+      </div>
+      <button
+        onclick={openCashModal}
+        class="rounded-xl p-4 text-left"
+        style="background: var(--color-bg-card); border: 1px solid var(--color-border); cursor: pointer;"
+      >
+        <div class="text-xs mb-1 flex items-center gap-1" style="color: var(--color-text-muted)">
+          Cash <span class="text-xs opacity-60">(click to edit)</span>
         </div>
-      {/each}
+        <div class="text-xl font-semibold" style="color: var(--color-text-primary)">${fmt(data.cash)}</div>
+      </button>
+      <div class="rounded-xl p-4" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
+        <div class="text-xs mb-1" style="color: var(--color-text-muted)">Unrealized P&amp;L</div>
+        <div class="text-xl font-semibold" style="color: {pnlColor(data.unrealized_pnl)}">
+          {data.unrealized_pnl >= 0 ? '+$' : '-$'}{fmt(Math.abs(data.unrealized_pnl))}
+        </div>
+      </div>
     </div>
 
     <!-- Open Positions -->
@@ -341,6 +394,46 @@
     </div>
   {/if}
 </div>
+
+<!-- Cash Modal -->
+{#if showCash}
+  <div
+    class="fixed inset-0 flex items-center justify-center z-50"
+    style="background: rgba(0,0,0,0.5)"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="rounded-xl p-6 w-80" style="background: var(--color-bg-card); border: 1px solid var(--color-border)">
+      <h2 class="text-base font-semibold mb-4" style="color: var(--color-text-primary)">Update Cash Balance</h2>
+      {#if cashError}
+        <div class="text-sm mb-3" style="color: var(--color-accent-red)">{cashError}</div>
+      {/if}
+      <label class="block text-xs mb-1" style="color: var(--color-text-muted)">Cash ($)</label>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        bind:value={cashAmount}
+        class="w-full rounded-lg px-3 py-2 text-sm mb-4"
+        style="background: var(--color-bg-input); border: 1px solid var(--color-border); color: var(--color-text-primary)"
+        placeholder="e.g. 10000.00"
+      />
+      <div class="flex gap-2 justify-end">
+        <button
+          onclick={() => (showCash = false)}
+          class="text-xs px-3 py-1.5 rounded-lg"
+          style="background: var(--color-bg-hover); color: var(--color-text-muted)"
+        >Cancel</button>
+        <button
+          onclick={submitCash}
+          disabled={cashLoading}
+          class="text-xs px-3 py-1.5 rounded-lg font-medium"
+          style="background: var(--color-accent-blue); color: #fff"
+        >{cashLoading ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- Buy Modal -->
 {#if showBuy}

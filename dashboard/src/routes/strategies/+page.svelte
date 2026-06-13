@@ -63,6 +63,44 @@
     }
   }
 
+  let creatingExample = $state(false);
+
+  async function createExample() {
+    creatingExample = true;
+    try {
+      const cfg = await strategy.create({
+        name: 'Momentum + Trend Example',
+        description: 'Demonstrates a full pipeline: momentum identifier, trend-follow timer, ATR sizer.',
+        enabled: false,
+        composition: 'pipeline',
+        universe: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'JPM', 'V', 'UNH'],
+        plugins: [
+          { role: 'identifier', name: 'momentum' },
+          { role: 'timer',      name: 'trend-follow' },
+          { role: 'sizer',      name: 'atr-sizer' },
+        ],
+        parameters: {
+          lookback_days: '90',
+          top_n: '10',
+          min_bars: '60',
+          fast_ema: '12',
+          slow_ema: '26',
+          adx_period: '14',
+          adx_threshold: '25.0',
+          long_only: 'true',
+          risk_per_trade: '0.01',
+          max_position_pct: '0.05',
+          atr_period: '14',
+        },
+      });
+      configs = [cfg, ...configs];
+    } catch (e) {
+      alert('Failed to create example: ' + String(e));
+    } finally {
+      creatingExample = false;
+    }
+  }
+
   async function toggleEnabled(cfg: StrategyConfig) {
     try {
       const updated = await strategy.update(cfg.id, { enabled: !cfg.enabled });
@@ -76,13 +114,23 @@
 <div class="p-6">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-semibold" style="color: var(--color-text-primary)">Strategy Manager</h1>
-    <button
-      onclick={openCreate}
-      class="text-sm px-4 py-2 rounded-lg font-medium"
-      style="background: var(--color-accent-blue); color: white;"
-    >
-      + New Strategy
-    </button>
+    <div class="flex gap-2">
+      <button
+        onclick={createExample}
+        disabled={creatingExample}
+        class="text-sm px-4 py-2 rounded-lg font-medium"
+        style="background: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-secondary); opacity: {creatingExample ? 0.6 : 1};"
+      >
+        {creatingExample ? 'Creating…' : '⚡ Example Strategy'}
+      </button>
+      <button
+        onclick={openCreate}
+        class="text-sm px-4 py-2 rounded-lg font-medium"
+        style="background: var(--color-accent-blue); color: white;"
+      >
+        + New Strategy
+      </button>
+    </div>
   </div>
 
   {#if loading}

@@ -21,6 +21,7 @@ use axum::{
     Json, Router,
 };
 use economind_agentic::{ChatMessage, DisclosureContext, RequestedDepth};
+use tracing::debug;
 use economind_db::storage::{ChatMessageRow, ChatSessionRow, ChatStorage};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -39,6 +40,9 @@ pub struct ChatRequest {
     pub persona_id: Option<String>,
     /// Disclosure depth hint for the persona.  Ignored without `persona_id`.
     pub depth: Option<RequestedDepth>,
+    /// Optional dashboard context injected as a system message at the start
+    /// of the conversation (e.g. current page state, open positions, etc.).
+    pub context: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -108,7 +112,7 @@ async fn chat_handler(
                 .into_response();
         }
     };
-    let prior_history = if req.session_id.is_some() {
+    let mut prior_history: Vec<ChatMessage> = if req.session_id.is_some() {
         stored_messages
             .iter()
             .map(|msg| ChatMessage {
@@ -119,6 +123,33 @@ async fn chat_handler(
     } else {
         req.history.clone()
     };
+
+    // Inject dashboard context as a system message on every request, replacing any
+    // stale injection from a prior turn so the agent always sees current page state.
+    prior_history.retain(|m| {
+        !(m.role == "system" && m.content.contains("User is currently viewing:"))
+    });
+    if let Some(ref ctx) = req.context {
+        if !ctx.trim().is_empty() {
+            prior_history.insert(0, ChatMessage {
+                role: "system".into(),
+                content: format!(
+                    "User is currently viewing:\n\n{ctx}\n\nUse this context to answer their questions accurately."
+                ),
+            });
+        }
+    }
+
+    debug!(
+        session_id = %session_id,
+        history_len = prior_history.len(),
+        has_context = req.context.is_some(),
+        message = %req.message,
+        "chat: sending to LLM"
+    );
+    if let Some(ref ctx) = req.context {
+        debug!(context = %ctx, "chat: injected page context");
+    }
 
     let result = if let Some(ref pid) = req.persona_id {
         let ctx = DisclosureContext {

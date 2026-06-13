@@ -204,6 +204,25 @@ export interface Bar {
   volume: number;
 }
 
+export interface SymbolCoverage {
+  symbol: string;
+  name: string;
+  sector: string;
+  bar_count: number;
+  first_bar: string | null;
+  last_bar: string | null;
+  income_count: number;
+  balance_count: number;
+  cashflow_count: number;
+}
+
+export interface MacroSeriesEntry {
+  series_id: string;
+  count: number;
+  first_date: string | null;
+  last_date: string | null;
+}
+
 export interface IngestResult {
   status: string;
   summary: string;
@@ -366,6 +385,8 @@ interface BacktestDetailResponse {
 export const instruments = {
   list: () => get<Instrument[]>('/instruments'),
   get: (symbol: string) => get<Instrument>(`/instruments/${symbol}`),
+  add: (symbol: string) => post<{ symbol: string; status: string }>('/instruments', { symbol }),
+  remove: (symbol: string) => del<{ symbol: string; status: string }>(`/instruments/${encodeURIComponent(symbol)}`),
 };
 
 // ── Signals ────────────────────────────────────────────────────────────────────
@@ -426,6 +447,7 @@ export const portfolio = {
   listWatches: () => get<WatchItem[]>('/watchlist'),
   addWatch: (symbol: string) => post<WatchItem>('/watchlist', { symbol }),
   removeWatch: (symbol: string) => del<{ status: string; symbol: string }>(`/watchlist/${encodeURIComponent(symbol)}`),
+  setCash: (cash: string) => put<BackendPortfolioSummary>('/positions/cash', { cash }).then(toPortfolioSummary),
 };
 
 // ── Strategy ───────────────────────────────────────────────────────────────────
@@ -435,6 +457,9 @@ export interface CreateStrategyRequest {
   description?: string;
   composition?: string;
   enabled?: boolean;
+  universe?: string[];
+  plugins?: PluginSpec[];
+  parameters?: Record<string, string>;
 }
 
 export const strategy = {
@@ -458,6 +483,7 @@ export const backtest = {
 // ── Data ────────────────────────────────────────────────────────────────────────
 
 export const data = {
+  catalog: () => get<{ symbols: SymbolCoverage[]; macro_series: MacroSeriesEntry[] }>('/data/catalog'),
   bars: (symbol: string, from: string, to: string) =>
     get<BarsResponse>(`/data/bars?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}`).then(r => r.bars),
   ingestBars: (req: { since?: string; concurrency?: number }) =>
@@ -476,7 +502,7 @@ export const data = {
 // ── Agent Chat ────────────────────────────────────────────────────────────────
 
 export const chat = {
-  send: (req: { message: string; history: ChatMessage[]; session_id?: string; persona_id?: string; depth?: 'basic' | 'detailed' | 'expert' }) =>
+  send: (req: { message: string; history: ChatMessage[]; session_id?: string; persona_id?: string; depth?: 'basic' | 'detailed' | 'expert'; context?: string }) =>
     post<ChatResponse>('/chat', req),
   personas: () =>
     get<{ personas: ChatPersona[] }>('/chat/personas').then((r) => r.personas),
@@ -506,6 +532,9 @@ export const settings = {
   notifications: () => get<NotificationsSettings>('/settings/notifications'),
   updateNotifications: (req: NotificationsSettings) =>
     put<NotificationsSettings>('/settings/notifications', req),
+  schedulerStatus: () => get<ScheduleSettings & { enabled: boolean }>('/scheduler/status'),
+  triggerJob: (job: 'bars' | 'macro' | 'fundamentals') =>
+    post<{ job: string; status: string; summary: string }>(`/scheduler/trigger/${job}`, {}),
 };
 
 function toNumber(value: string | number | undefined): number | undefined {

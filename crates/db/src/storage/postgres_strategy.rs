@@ -9,7 +9,7 @@ use crate::storage::postgres::PostgresStorage;
 use crate::storage::strategy_traits::{
     BacktestRunRow, BacktestStorage, BacktestTradeRow, EquityCurvePoint, MacroSeriesPoint,
     MacroStorage, OpenPosition, PortfolioState, PortfolioStorage, StrategyConfigRow,
-    StrategyRunRow, StrategySignalRow, StrategyStorage,
+    StrategyRunRow, StrategySignalRow, StrategyStorage, WatchItem,
 };
 use crate::{StorageError, StorageResult};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -158,6 +158,44 @@ impl PortfolioStorage for PostgresStorage {
             available_cash,
             current_drawdown,
         })
+    }
+
+    async fn set_cash(&self, _cash: Decimal) -> StorageResult<()> {
+        Err(StorageError::Provider("set_cash not implemented for PostgresStorage".into()))
+    }
+
+    async fn get_open_position(&self, _id: Uuid) -> StorageResult<Option<OpenPosition>> {
+        Err(StorageError::Provider("get_open_position not implemented for PostgresStorage".into()))
+    }
+
+    async fn open_position(
+        &self,
+        _symbol: &Symbol,
+        _shares: Decimal,
+        _entry_price: Decimal,
+        _entry_at: DateTime<Utc>,
+    ) -> StorageResult<OpenPosition> {
+        Err(StorageError::Provider("open_position not implemented for PostgresStorage".into()))
+    }
+
+    async fn close_position(&self, _id: Uuid, _exit_price: Decimal, _exit_at: DateTime<Utc>) -> StorageResult<()> {
+        Err(StorageError::Provider("close_position not implemented for PostgresStorage".into()))
+    }
+
+    async fn add_watch(&self, _symbol: &Symbol) -> StorageResult<WatchItem> {
+        Err(StorageError::Provider("add_watch not implemented for PostgresStorage".into()))
+    }
+
+    async fn remove_watch(&self, _symbol: &Symbol) -> StorageResult<()> {
+        Err(StorageError::Provider("remove_watch not implemented for PostgresStorage".into()))
+    }
+
+    async fn list_watches(&self) -> StorageResult<Vec<WatchItem>> {
+        Ok(vec![])
+    }
+
+    async fn get_watch(&self, _symbol: &Symbol) -> StorageResult<Option<WatchItem>> {
+        Ok(None)
     }
 }
 

@@ -100,6 +100,9 @@ pub trait PortfolioStorage: Send + Sync {
         exit_at: DateTime<Utc>,
     ) -> StorageResult<()>;
 
+    /// Set the available cash balance in today's portfolio equity snapshot.
+    async fn set_cash(&self, cash: Decimal) -> StorageResult<()>;
+
     // ── Watchlist ─────────────────────────────────────────────────────────────
 
     async fn add_watch(&self, symbol: &Symbol) -> StorageResult<WatchItem>;

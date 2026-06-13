@@ -59,6 +59,11 @@ impl DataStore {
         &self.duck
     }
 
+    /// Return per-symbol bar/fundamental coverage and macro series inventory.
+    pub async fn catalog(&self) -> StorageResult<crate::storage::DataCatalog> {
+        self.duck.query_catalog().await
+    }
+
     /// Read a runtime setting from DuckDB.
     pub async fn get_setting(&self, key: &str) -> StorageResult<Option<String>> {
         self.duck.get_setting(key).await
@@ -248,6 +253,9 @@ impl PortfolioStorage for DataStore {
         exit_at: chrono::DateTime<chrono::Utc>,
     ) -> StorageResult<()> {
         self.duck.close_position(id, exit_price, exit_at).await
+    }
+    async fn set_cash(&self, cash: rust_decimal::Decimal) -> StorageResult<()> {
+        self.duck.set_cash(cash).await
     }
     async fn add_watch(&self, symbol: &Symbol) -> StorageResult<WatchItem> {
         self.duck.add_watch(symbol).await

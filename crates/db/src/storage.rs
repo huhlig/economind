@@ -6,7 +6,7 @@ mod duckdb;
 mod strategy_traits;
 mod traits;
 
-pub use self::duckdb::DuckDatabase;
+pub use self::duckdb::{DataCatalog, DuckDatabase, MacroEntry, SymbolCoverage};
 pub use self::strategy_traits::{
     BacktestRunRow, BacktestStorage, BacktestTradeRow, ChatMessageRow, ChatSessionRow,
     ChatStorage, EquityCurvePoint, MacroSeriesPoint, MacroStorage, OpenPosition, PortfolioState,
